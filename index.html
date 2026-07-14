@@ -1,1 +1,417 @@
-<h1>learn.wowteach.ru — скоро 🦉</h1>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#7B61FF">
+<title>WowSpeak Learn 🦉</title>
+<meta name="robots" content="noindex">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --purple:#7B61FF; --purple-dark:#5A45D9; --purple-light:#F0ECFF;
+  --orange:#FF8C42; --orange-light:#FFE8D6;
+  --pink:#E91E8C; --green:#22C55E; --green-light:#DCFCE7;
+  --red:#EF4444; --red-light:#FEE2E2; --yellow:#F59E0B; --yellow-light:#FEF3C7;
+  --cream:#FFFBF2; --cream-dark:#F5EFE2;
+  --dark:#2D2D3F; --gray:#5A5A6E; --white:#fff;
+  --radius:14px; --radius-lg:22px;
+  --shadow-sm:0 1px 3px rgba(45,45,63,.06); --shadow:0 8px 28px rgba(45,45,63,.12);
+}
+*{box-sizing:border-box;margin:0;padding:0;font-family:inherit}
+body{font-family:'Nunito',sans-serif;background:var(--cream);color:var(--dark);line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  background-image:radial-gradient(circle, rgba(123,97,255,.05) 1px, transparent 1px);background-size:26px 26px}
+h1,h2,h3{font-family:'Fredoka',sans-serif;font-weight:600;line-height:1.25}
+a{color:var(--purple);text-decoration:none}
+button{font-family:inherit;cursor:pointer}
+.wrap{max-width:980px;margin:0 auto;padding:0 24px}
+
+.header{position:sticky;top:0;z-index:40;background:rgba(255,251,242,.94);backdrop-filter:blur(10px);border-bottom:1px solid var(--cream-dark)}
+.header .wrap{display:flex;align-items:center;justify-content:space-between;padding:14px 24px}
+.logo{font-family:'Fredoka',sans-serif;font-size:22px;color:var(--purple);font-weight:600}
+.header .me{font-size:13px;color:var(--gray)}
+.header .me button{background:none;border:none;color:var(--purple);font-weight:800;font-size:13px}
+
+.card{background:var(--white);border:1px solid var(--cream-dark);border-radius:var(--radius-lg);
+  padding:28px 30px;box-shadow:var(--shadow-sm);margin-bottom:20px}
+
+/* login */
+#login{display:none;max-width:420px;margin:80px auto;text-align:center}
+#login input{width:100%;padding:13px 14px;border:2px solid var(--cream-dark);border-radius:var(--radius);
+  font-size:16px;background:#FDFCF8;margin-bottom:12px}
+#login button.go{width:100%;padding:14px;border:none;border-radius:999px;font-weight:800;font-size:16px;
+  background:linear-gradient(135deg,var(--purple),var(--purple-dark));color:#fff}
+#login .msg{margin-top:12px;font-size:14px;font-weight:700;color:var(--red);display:none}
+
+/* каталог */
+#catalog{display:none;padding:34px 0 80px}
+.course-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:18px}
+.course{background:#fff;border:1px solid var(--cream-dark);border-radius:var(--radius-lg);padding:24px;
+  box-shadow:var(--shadow-sm);cursor:pointer;transition:transform .15s,box-shadow .15s;display:flex;flex-direction:column}
+.course:hover{transform:translateY(-3px);box-shadow:var(--shadow)}
+.course .emo{font-size:40px;margin-bottom:10px}
+.course h3{font-size:19px;margin-bottom:5px}
+.course .sub{font-size:13.5px;color:var(--gray);flex:1;margin-bottom:14px}
+.bar{height:8px;background:var(--cream-dark);border-radius:999px;overflow:hidden;margin-bottom:6px}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--purple),var(--pink))}
+.course .meta{font-size:12px;color:var(--gray);font-weight:700;display:flex;justify-content:space-between}
+.badge-done{background:var(--green-light);color:#15803D;font-size:11px;font-weight:800;border-radius:999px;padding:3px 10px}
+
+/* курс */
+#course{display:none;padding:30px 0 80px}
+.back{font-size:13.5px;font-weight:800;color:var(--gray);display:inline-block;margin-bottom:16px}
+.course-head{display:flex;gap:18px;align-items:flex-start;margin-bottom:22px}
+.course-head .emo{font-size:52px}
+.course-head h1{font-size:clamp(24px,4vw,32px)}
+.course-head .sub{color:var(--gray);font-size:16px;margin-top:4px}
+
+.lesson-item{background:#fff;border:2px solid var(--cream-dark);border-radius:var(--radius);
+  padding:16px 18px;margin-bottom:10px;display:flex;gap:14px;align-items:center;cursor:pointer;transition:border-color .15s}
+.lesson-item:hover{border-color:var(--purple)}
+.lesson-item.locked{opacity:.55;cursor:not-allowed;background:#FAF8F3}
+.lesson-item.locked:hover{border-color:var(--cream-dark)}
+.lesson-item.done{border-color:var(--green);background:var(--green-light)}
+.lesson-item .n{width:32px;height:32px;border-radius:50%;background:var(--cream-dark);color:var(--gray);
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0}
+.lesson-item.done .n{background:var(--green);color:#fff}
+.lesson-item .t{flex:1}
+.lesson-item .t b{font-size:15.5px;display:block}
+.lesson-item .t span{font-size:13px;color:var(--gray)}
+
+/* урок */
+#lesson{display:none;padding:30px 0 80px}
+.block{margin-bottom:26px}
+.block-video iframe,.block-video video{width:100%;aspect-ratio:16/9;border:none;border-radius:var(--radius);background:#000}
+.block-text{font-size:16px;line-height:1.75}
+.block-text h3{margin:18px 0 8px}
+.block-text ul,.block-text ol{margin:10px 0 10px 22px}
+.block-text p{margin-bottom:12px}
+
+.qbox{background:#fff;border:2px solid var(--cream-dark);border-radius:var(--radius-lg);padding:24px 26px}
+.qbox h3{font-size:18px;margin-bottom:16px}
+.q{margin-bottom:22px}
+.q .qt{font-weight:800;font-size:15.5px;margin-bottom:10px}
+.opt{display:flex;gap:10px;align-items:flex-start;padding:10px 14px;border:2px solid var(--cream-dark);
+  border-radius:12px;margin-bottom:8px;cursor:pointer;background:#FDFCF8;font-size:14.5px}
+.opt:hover{border-color:var(--purple)}
+.opt input{margin-top:3px;accent-color:var(--purple);width:17px;height:17px}
+.opt.correct{border-color:var(--green);background:var(--green-light)}
+.opt.wrong{border-color:var(--red);background:var(--red-light)}
+.q textarea{width:100%;padding:12px 14px;border:2px solid var(--cream-dark);border-radius:12px;
+  font-size:15px;background:#FDFCF8;min-height:100px;resize:vertical}
+.explain{font-size:13.5px;color:var(--gray);background:var(--cream);border-radius:10px;padding:10px 14px;margin-top:8px}
+
+.btn{background:linear-gradient(135deg,var(--purple),var(--purple-dark));color:#fff;border:none;
+  border-radius:999px;padding:14px 32px;font-weight:800;font-size:15.5px;box-shadow:var(--shadow)}
+.btn:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
+.btn-green{background:linear-gradient(135deg,var(--green),#16A34A)}
+.btn-ghost{background:none;color:var(--gray);border:2px solid var(--cream-dark);box-shadow:none}
+
+.note{border-radius:var(--radius);padding:14px 18px;font-size:14.5px;margin-top:14px}
+.note.ok{background:var(--green-light);color:#15803D}
+.note.warn{background:var(--yellow-light);color:#B45309}
+.note.err{background:var(--red-light);color:#B91C1C}
+.note.info{background:var(--purple-light);color:var(--purple-dark)}
+
+.cert{background:linear-gradient(135deg,#FFF8E7,#FFE8D6);border:2px solid var(--orange);
+  border-radius:var(--radius-lg);padding:26px;text-align:center;margin-bottom:20px}
+.cert .big{font-size:46px}
+.loading{text-align:center;color:var(--gray);padding:50px}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="wrap">
+    <a class="logo" href="#" onclick="showCatalog();return false">🦉 WowSpeak Learn</a>
+    <div class="me" id="me"></div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- Вход -->
+  <div id="login">
+    <div class="card">
+      <h1 style="font-size:24px;margin-bottom:8px">Обучение WowSpeak</h1>
+      <p style="color:var(--gray);font-size:15px;margin-bottom:20px">Войдите тем же логином, что и на платформе.</p>
+      <input type="email" id="email" placeholder="E-mail">
+      <input type="password" id="pass" placeholder="Пароль" onkeydown="if(event.key==='Enter')doLogin()">
+      <div class="cf-turnstile" data-sitekey="0x4AAAAAADz1mfQKn0ofqzfs" data-callback="onCaptcha" style="margin:0 0 12px;display:flex;justify-content:center"></div>
+      <button class="go" onclick="doLogin()">Войти</button>
+      <div class="msg" id="loginMsg"></div>
+    </div>
+  </div>
+
+  <!-- Каталог -->
+  <div id="catalog">
+    <h1 style="font-size:clamp(26px,4vw,34px);margin-bottom:6px">Мои курсы</h1>
+    <p style="color:var(--gray);margin-bottom:26px">Обучение, тренинги и материалы для преподавателей WowSpeak</p>
+    <div class="course-grid" id="courseGrid"><div class="loading">Загружаю курсы…</div></div>
+  </div>
+
+  <!-- Курс -->
+  <div id="course">
+    <a class="back" href="#" onclick="showCatalog();return false">← Все курсы</a>
+    <div id="courseBody"></div>
+  </div>
+
+  <!-- Урок -->
+  <div id="lesson">
+    <a class="back" href="#" onclick="openCourse(currentCourse);return false">← К курсу</a>
+    <div id="lessonBody"></div>
+  </div>
+
+</div>
+
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = 'https://api.wowteach.ru';
+const SUPABASE_KEY = 'sb_publishable_nZIl9kzPNhkd9Gbsm7aAgA_cAeY1s4x';
+// общий cookie на .wowteach.ru — вход подхватывается из app / job
+const cookieStore = {
+  getItem: k => { const m = document.cookie.match(new RegExp('(?:^|; )' + k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + '=([^;]+)')); return m ? decodeURIComponent(m[1]) : null; },
+  setItem: (k,v) => { document.cookie = `${k}=${encodeURIComponent(v)}; domain=.wowteach.ru; path=/; max-age=31536000; secure; samesite=lax`; },
+  removeItem: k => { document.cookie = `${k}=; domain=.wowteach.ru; path=/; max-age=0; secure; samesite=lax`; }
+};
+const sb = location.hostname.endsWith('.wowteach.ru')
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { storage: cookieStore } })
+  : window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let captchaToken = null;
+function onCaptcha(t){ captchaToken = t; }
+
+let currentCourse = null, currentCourseData = null;
+
+// ============ Вход ============
+document.addEventListener('DOMContentLoaded', init);
+async function init(){
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { show('login'); return; }
+  document.getElementById('me').innerHTML =
+    `${esc(session.user.email)} · <button onclick="logout()">Выйти</button>`;
+  showCatalog();
+}
+function show(id){
+  ['login','catalog','course','lesson'].forEach(k =>
+    document.getElementById(k).style.display = k === id ? 'block' : 'none');
+  window.scrollTo({ top: 0 });
+}
+async function doLogin(){
+  const msg = document.getElementById('loginMsg');
+  msg.style.display = 'none';
+  const { error } = await sb.auth.signInWithPassword({
+    email: document.getElementById('email').value.trim().toLowerCase(),
+    password: document.getElementById('pass').value,
+    options: { captchaToken }
+  });
+  if (error) {
+    msg.textContent = 'Не получилось войти: проверьте логин и пароль.';
+    msg.style.display = 'block';
+    if (window.turnstile) { turnstile.reset(); captchaToken = null; }
+    return;
+  }
+  init();
+}
+async function logout(){ await sb.auth.signOut(); location.reload(); }
+
+// ============ Каталог ============
+async function showCatalog(){
+  show('catalog');
+  const { data, error } = await sb.rpc('learn_my_courses');
+  const grid = document.getElementById('courseGrid');
+  if (error) { grid.innerHTML = 'Ошибка: ' + esc(error.message); return; }
+  if (!data.length) { grid.innerHTML = '<div class="loading">Курсов пока нет 🦉</div>'; return; }
+  grid.innerHTML = data.map(c => {
+    const pct = c.total_lessons ? Math.round(c.done_lessons * 100 / c.total_lessons) : 0;
+    return `<div class="course" onclick="openCourse('${c.slug}')">
+      <div class="emo">${c.emoji || '📚'}</div>
+      <h3>${esc(c.title)}</h3>
+      <div class="sub">${esc(c.subtitle || '')}</div>
+      ${c.enrolled ? `<div class="bar"><i style="width:${pct}%"></i></div>
+        <div class="meta"><span>${c.done_lessons} из ${c.total_lessons} уроков</span>
+        ${c.completed_at ? '<span class="badge-done">✓ пройден</span>' : `<span>${pct}%</span>`}</div>`
+        : `<div class="meta"><span>${c.total_lessons} уроков</span><span style="color:var(--purple)">Начать →</span></div>`}
+    </div>`;
+  }).join('');
+}
+
+// ============ Курс ============
+async function openCourse(slug){
+  currentCourse = slug;
+  show('course');
+  const body = document.getElementById('courseBody');
+  body.innerHTML = '<div class="loading">Загружаю курс…</div>';
+
+  // запись на курс при первом открытии
+  await sb.rpc('learn_enroll', { p_course_slug: slug });
+
+  const { data, error } = await sb.rpc('learn_course_view', { p_course_slug: slug });
+  if (error) { body.innerHTML = 'Ошибка: ' + esc(error.message); return; }
+  currentCourseData = data;
+
+  const done = (data.lessons||[]).filter(l => l.done_at).length;
+  const total = (data.lessons||[]).length;
+
+  body.innerHTML = `
+    <div class="course-head">
+      <div class="emo">${data.emoji || '📚'}</div>
+      <div>
+        <h1>${esc(data.title)}</h1>
+        <div class="sub">${esc(data.subtitle || '')}</div>
+      </div>
+    </div>
+
+    ${data.certificate ? `<div class="cert">
+      <div class="big">🏆</div>
+      <h2 style="font-size:20px;margin:6px 0">Курс пройден!</h2>
+      <div style="font-size:14px;color:var(--gray)">Сертификат № <b>${esc(data.certificate)}</b></div>
+    </div>` : ''}
+
+    ${data.description ? `<div class="card" style="padding:20px 24px">${data.description}</div>` : ''}
+
+    <div class="bar" style="height:10px;margin-bottom:8px"><i style="width:${total?done*100/total:0}%"></i></div>
+    <div style="font-size:13px;color:var(--gray);font-weight:700;margin-bottom:20px">
+      ${done} из ${total} уроков пройдено
+      ${data.deadline_at && !data.completed_at ? ` · до ${new Date(data.deadline_at).toLocaleDateString('ru-RU')}` : ''}
+    </div>
+
+    ${(data.lessons||[]).map((l, i) => `
+      <div class="lesson-item ${l.done_at?'done':''} ${l.locked?'locked':''}"
+           onclick="${l.locked ? '' : `openLesson('${l.slug}')`}">
+        <div class="n">${l.done_at ? '✓' : (l.locked ? '🔒' : i+1)}</div>
+        <div class="t"><b>${esc(l.title)}</b>
+          <span>${esc(l.summary || '')}${l.score != null ? ` · результат ${l.score}%` : ''}</span></div>
+        ${l.locked ? '<span style="font-size:12px;color:var(--gray)">пройдите предыдущий</span>' : '<span style="color:var(--purple);font-weight:800">→</span>'}
+      </div>`).join('')}
+  `;
+}
+
+// ============ Урок ============
+let currentLesson = null;
+function openLesson(slug){
+  const l = (currentCourseData.lessons||[]).find(x => x.slug === slug);
+  if (!l || l.locked) return;
+  currentLesson = l;
+  show('lesson');
+  const body = document.getElementById('lessonBody');
+  body.innerHTML = `
+    <h1 style="font-size:clamp(22px,3.5vw,28px);margin-bottom:6px">${esc(l.title)}</h1>
+    <div style="color:var(--gray);margin-bottom:26px">${esc(l.summary || '')}</div>
+    ${(l.blocks||[]).map(b => renderBlock(b)).join('')}
+    <div style="text-align:center;margin-top:34px" id="finishBox">
+      ${l.done_at
+        ? '<div class="note ok">✅ Урок пройден</div>'
+        : `<button class="btn btn-green" onclick="finishLesson()">Завершить урок ✓</button>`}
+    </div>`;
+}
+
+function renderBlock(b){
+  const p = b.payload || {};
+  if (b.type === 'video') {
+    let embed = '';
+    if (p.provider === 'youtube') {
+      const id = (p.url||'').match(/(?:youtu\.be\/|v=|embed\/)([\w-]{6,})/)?.[1] || '';
+      embed = `<iframe src="https://www.youtube.com/embed/${id}" allowfullscreen></iframe>`;
+    } else if (p.provider === 'vimeo') {
+      const id = (p.url||'').match(/vimeo\.com\/(\d+)/)?.[1] || '';
+      embed = `<iframe src="https://player.vimeo.com/video/${id}" allowfullscreen></iframe>`;
+    } else {
+      embed = `<video controls src="${esc(p.url||'')}"></video>`;
+    }
+    return `<div class="block block-video">
+      ${p.title ? `<h3 style="font-size:17px;margin-bottom:10px">🎬 ${esc(p.title)}</h3>` : ''}
+      ${embed}</div>`;
+  }
+  if (b.type === 'text') {
+    return `<div class="block block-text card">${p.html || ''}</div>`;
+  }
+  if (b.type === 'task') {
+    const s = b.submission;
+    return `<div class="block"><div class="qbox">
+      <h3>✍️ Задание</h3>
+      <div class="block-text">${p.html || ''}</div>
+      <textarea id="task-${b.id}" placeholder="Ваш ответ…" style="margin-top:14px">${esc(s?.answers?.text || '')}</textarea>
+      ${s?.review_status === 'pending' ? '<div class="note warn">⏳ Отправлено методисту на проверку</div>' : ''}
+      ${s?.review_status === 'approved' ? `<div class="note ok">✅ Принято методистом${s.note ? ': ' + esc(s.note) : ''}</div>` : ''}
+      ${s?.review_status === 'rejected' ? `<div class="note err">Нужно доработать${s.note ? ': ' + esc(s.note) : ''}</div>` : ''}
+      <div style="margin-top:14px"><button class="btn" onclick="submitTask('${b.id}')">Отправить на проверку</button></div>
+    </div></div>`;
+  }
+  if (b.type === 'quiz') {
+    const s = b.submission;
+    const answered = s?.answers != null;
+    return `<div class="block"><div class="qbox" id="quiz-${b.id}">
+      <h3>📝 Тест</h3>
+      ${(p.questions||[]).map((q, qi) => `
+        <div class="q" data-qi="${qi}">
+          <div class="qt">${qi+1}. ${esc(q.q)}</div>
+          ${q.type === 'text'
+            ? `<textarea data-a="${qi}" placeholder="Ваш ответ…">${esc(answered ? (s.answers[qi]?.[0] ?? '') : '')}</textarea>`
+            : (q.options||[]).map((o, oi) => `
+                <label class="opt">
+                  <input type="${q.type==='multi'?'checkbox':'radio'}" name="q-${b.id}-${qi}" value="${oi}"
+                    ${answered && (s.answers[qi]||[]).includes(oi) ? 'checked' : ''}>
+                  <span>${esc(o)}</span>
+                </label>`).join('')}
+        </div>`).join('')}
+      ${s?.auto_score != null ? `<div class="note ${s.auto_score >= 80 ? 'ok' : 'warn'}">Результат: <b>${s.auto_score}%</b></div>` : ''}
+      ${s?.review_status === 'pending' ? '<div class="note warn">⏳ Развёрнутые ответы отправлены методисту</div>' : ''}
+      <div style="margin-top:16px"><button class="btn" onclick="submitQuiz('${b.id}')">Проверить</button></div>
+    </div></div>`;
+  }
+  return '';
+}
+
+async function submitQuiz(blockId){
+  const box = document.getElementById('quiz-' + blockId);
+  const answers = {};
+  box.querySelectorAll('.q').forEach(qEl => {
+    const qi = qEl.dataset.qi;
+    const ta = qEl.querySelector('textarea');
+    if (ta) { answers[qi] = [ta.value]; return; }
+    answers[qi] = [...qEl.querySelectorAll('input:checked')].map(i => parseInt(i.value));
+  });
+  const { data, error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: answers });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  await refreshLesson();
+}
+
+async function submitTask(blockId){
+  const text = document.getElementById('task-' + blockId).value.trim();
+  if (!text) { alert('Напишите ответ.'); return; }
+  const { error } = await sb.rpc('learn_submit_block',
+    { p_block_id: blockId, p_answers: { text } });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  await refreshLesson();
+}
+
+async function finishLesson(){
+  const { data, error } = await sb.rpc('learn_complete_lesson',
+    { p_course_slug: currentCourse, p_lesson_slug: currentLesson.slug });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  if (!data.ok) {
+    document.getElementById('finishBox').innerHTML =
+      `<div class="note warn">${esc(data.reason)}</div>
+       <div style="margin-top:12px"><button class="btn btn-green" onclick="finishLesson()">Проверить ещё раз</button></div>`;
+    return;
+  }
+  if (data.course_done) {
+    alert('🎉 Курс пройден!');
+  }
+  await openCourse(currentCourse);
+}
+
+async function refreshLesson(){
+  const { data } = await sb.rpc('learn_course_view', { p_course_slug: currentCourse });
+  currentCourseData = data;
+  const l = (data.lessons||[]).find(x => x.slug === currentLesson.slug);
+  if (l) { currentLesson = l; openLesson(l.slug); }
+}
+
+function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+</script>
+</body>
+</html>
