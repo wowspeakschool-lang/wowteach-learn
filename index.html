@@ -102,6 +102,29 @@ button{font-family:inherit;cursor:pointer}
   font-size:15px;background:#FDFCF8;min-height:100px;resize:vertical}
 .explain{font-size:13.5px;color:var(--gray);background:var(--cream);border-radius:10px;padding:10px 14px;margin-top:8px}
 
+/* редактор задания */
+.editor{border:2px solid var(--cream-dark);border-radius:var(--radius);overflow:hidden;background:#FDFCF8;transition:border-color .15s,box-shadow .15s}
+.editor:focus-within{border-color:var(--purple);box-shadow:0 0 0 4px var(--purple-light)}
+.editor.locked{opacity:.7;background:#FAF8F3}
+.toolbar{display:flex;gap:2px;padding:6px 8px;border-bottom:1px solid var(--cream-dark);background:#fff;flex-wrap:wrap}
+.toolbar button{width:34px;height:32px;border:none;background:none;border-radius:8px;font-size:14px;color:var(--gray);cursor:pointer;display:flex;align-items:center;justify-content:center}
+.toolbar button:hover{background:var(--purple-light);color:var(--purple-dark)}
+.ed{min-height:120px;max-height:420px;overflow-y:auto;padding:14px 16px;font-size:15px;line-height:1.65;outline:none}
+.ed:empty:before{content:attr(data-ph);color:#9A9AA8}
+.ed h3{font-size:17px;margin:10px 0 6px}
+.ed blockquote{border-left:3px solid var(--purple);margin:8px 0;padding:2px 0 2px 14px;color:var(--gray)}
+.ed ul,.ed ol{margin:8px 0 8px 22px}
+
+/* файлы */
+.files{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.fchip{display:flex;justify-content:space-between;align-items:center;gap:10px;background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:10px 14px;font-size:14px;font-weight:700}
+.fchip button{background:none;border:none;color:var(--gray);font-size:15px;cursor:pointer;padding:2px 6px;border-radius:6px}
+.fchip button:hover{background:var(--red-light);color:var(--red)}
+.drop{display:flex;flex-direction:column;align-items:center;gap:4px;margin-top:12px;padding:18px;border:2px dashed var(--cream-dark);border-radius:var(--radius);cursor:pointer;text-align:center;transition:border-color .15s,background .15s}
+.drop:hover{border-color:var(--purple);background:var(--purple-light)}
+.drop span:first-child{font-weight:800;font-size:14.5px;color:var(--purple-dark)}
+.drop .hint{font-size:12px;color:var(--gray);font-weight:600}
+
 .btn{background:linear-gradient(135deg,var(--purple),var(--purple-dark));color:#fff;border:none;
   border-radius:999px;padding:14px 32px;font-weight:800;font-size:15.5px;box-shadow:var(--shadow)}
 .btn:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
@@ -184,6 +207,7 @@ let captchaToken = null;
 function onCaptcha(t){ captchaToken = t; }
 
 let currentCourse = null, currentCourseData = null;
+let edFiles = {};   // { blockId: [ {file, path, name, size, type, uploaded} ] }
 
 // ============ Вход ============
 document.addEventListener('DOMContentLoaded', init);
@@ -330,24 +354,66 @@ function renderBlock(b){
   }
   if (b.type === 'task') {
     const s = b.submission;
+    const ans = s?.answers || {};
+    const savedHtml = ans.html || ans.text || '';   // text — совместимость со старым форматом
+    const files = ans.files || [];
+    // восстанавливаем уже загруженные файлы в состояние редактора
+    edFiles[b.id] = files.map(f => ({ ...f, uploaded: true }));
+    const locked = s?.review_status === 'pending' || s?.review_status === 'approved';
     return `<div class="block"><div class="qbox">
       <h3>✍️ Задание</h3>
-      <div class="block-text">${p.html || ''}</div>
-      <textarea id="task-${b.id}" placeholder="Ваш ответ…" style="margin-top:14px">${esc(s?.answers?.text || '')}</textarea>
+      <div class="block-text" style="margin-bottom:16px">${p.html || ''}</div>
+
+      <div class="editor ${locked?'locked':''}" id="ed-wrap-${b.id}">
+        <div class="toolbar">
+          <button type="button" onclick="fmt('bold')" title="Жирный"><b>Ж</b></button>
+          <button type="button" onclick="fmt('italic')" title="Курсив"><i>К</i></button>
+          <button type="button" onclick="fmt('insertUnorderedList')" title="Список">•—</button>
+          <button type="button" onclick="fmt('insertOrderedList')" title="Нумерованный">1.</button>
+          <button type="button" onclick="fmtBlock('H3')" title="Заголовок">H</button>
+          <button type="button" onclick="fmtBlock('BLOCKQUOTE')" title="Цитата">❝</button>
+        </div>
+        <div class="ed" id="task-${b.id}" contenteditable="${locked?'false':'true'}"
+             data-ph="Напишите ваш ответ…" oninput="edCount('${b.id}')">${savedHtml}</div>
+      </div>
+
+      <div class="files" id="files-${b.id}">
+        ${files.map((f,i) => fileChip(f, b.id, i, locked)).join('')}
+      </div>
+      ${locked ? '' : `<label class="drop" id="drop-${b.id}">
+        <input type="file" id="file-${b.id}" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.doc,.docx,.ppt,.pptx,.txt,.mp4,.mov,.webm" onchange="pickFiles('${b.id}')" style="display:none">
+        <span>📎 Прикрепить файлы</span>
+        <span class="hint">PDF, картинки, Word, PowerPoint, видео до 5 мин · до 3 файлов, 50 МБ</span>
+      </label>`}
+
       ${s?.review_status === 'pending' ? '<div class="note warn">⏳ Отправлено методисту на проверку</div>' : ''}
       ${s?.review_status === 'approved' ? `<div class="note ok">✅ Принято методистом${s.note ? ': ' + esc(s.note) : ''}</div>` : ''}
-      ${s?.review_status === 'rejected' ? `<div class="note err">Нужно доработать${s.note ? ': ' + esc(s.note) : ''}</div>` : ''}
-      <div style="margin-top:14px"><button class="btn" onclick="submitTask('${b.id}')">Отправить на проверку</button></div>
+      ${s?.review_status === 'rejected' ? `<div class="note err">✏️ Нужно доработать${s.note ? ': ' + esc(s.note) : ''}</div>` : ''}
+
+      ${locked && s?.review_status !== 'rejected' ? '' :
+        `<div style="margin-top:16px"><button class="btn" id="taskBtn-${b.id}" onclick="submitTask('${b.id}')">Отправить на проверку</button></div>`}
     </div></div>`;
   }
   if (b.type === 'quiz') {
     const s = b.submission;
     const answered = s?.answers != null;
+    const res = s?.results || null;              // {"0":true,"1":false} — только верно/неверно
+    const wrong = res ? Object.values(res).filter(v => v === false).length : 0;
+    const pass = currentCourseData?.pass_score ?? 80;
+    const ok = s?.auto_score != null && s.auto_score >= pass;
+
     return `<div class="block"><div class="qbox" id="quiz-${b.id}">
       <h3>📝 Тест</h3>
-      ${(p.questions||[]).map((q, qi) => `
-        <div class="q" data-qi="${qi}">
-          <div class="qt">${qi+1}. ${esc(q.q)}</div>
+      ${(p.questions||[]).map((q, qi) => {
+        const mark = res ? res[qi] : undefined;   // true | false | undefined (текстовый)
+        const badge = mark === false
+          ? '<span style="font-size:12px;font-weight:800;color:var(--red);background:var(--red-light);border-radius:999px;padding:2px 10px;margin-left:8px">неверно</span>'
+          : mark === true
+          ? '<span style="font-size:12px;font-weight:800;color:#15803D;background:var(--green-light);border-radius:999px;padding:2px 10px;margin-left:8px">верно</span>'
+          : '';
+        return `
+        <div class="q" data-qi="${qi}" style="${mark === false ? 'border-left:3px solid var(--red);padding-left:12px' : ''}">
+          <div class="qt">${qi+1}. ${esc(q.q)}${badge}</div>
           ${q.type === 'text'
             ? `<textarea data-a="${qi}" placeholder="Ваш ответ…">${esc(answered ? (s.answers[qi]?.[0] ?? '') : '')}</textarea>`
             : (q.options||[]).map((o, oi) => `
@@ -356,13 +422,36 @@ function renderBlock(b){
                     ${answered && (s.answers[qi]||[]).includes(oi) ? 'checked' : ''}>
                   <span>${esc(o)}</span>
                 </label>`).join('')}
-        </div>`).join('')}
-      ${s?.auto_score != null ? `<div class="note ${s.auto_score >= 80 ? 'ok' : 'warn'}">Результат: <b>${s.auto_score}%</b></div>` : ''}
-      ${s?.review_status === 'pending' ? '<div class="note warn">⏳ Развёрнутые ответы отправлены методисту</div>' : ''}
-      <div style="margin-top:16px"><button class="btn" onclick="submitQuiz('${b.id}')">Проверить</button></div>
+        </div>`;
+      }).join('')}
+
+      ${s?.auto_score != null ? `<div class="note ${ok ? 'ok' : 'warn'}">
+        Результат: <b>${s.auto_score}%</b> ${ok ? '— тест пройден ✅' : `— нужно минимум ${pass}%`}
+        ${wrong > 0 ? `<br>Ошибок: <b>${wrong}</b>. Вопросы с ошибками отмечены — подумайте ещё раз и ответьте заново.` : ''}
+      </div>` : ''}
+      ${s?.review_status === 'pending' ? '<div class="note warn">⏳ Развёрнутые ответы отправлены методисту на проверку</div>' : ''}
+
+      <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn" onclick="submitQuiz('${b.id}')">${answered ? 'Проверить ещё раз' : 'Проверить'}</button>
+        ${wrong > 0 ? `<button class="btn btn-ghost" onclick="clearWrong('${b.id}')">Очистить неверные</button>` : ''}
+      </div>
     </div></div>`;
   }
   return '';
+}
+
+// снять отметки с неверно отвеченных вопросов, чтобы ответить заново
+function clearWrong(blockId){
+  const box = document.getElementById('quiz-' + blockId);
+  const block = (currentLesson.blocks||[]).find(x => x.id === blockId);
+  const res = block?.submission?.results || {};
+  box.querySelectorAll('.q').forEach(qEl => {
+    const qi = qEl.dataset.qi;
+    if (res[qi] === false) {
+      qEl.querySelectorAll('input').forEach(i => i.checked = false);
+      qEl.style.borderLeft = '3px solid var(--purple)';
+    }
+  });
 }
 
 async function submitQuiz(blockId){
@@ -379,13 +468,81 @@ async function submitQuiz(blockId){
   await refreshLesson();
 }
 
+// ===== Редактор заданий =====
+function fmt(cmd){ document.execCommand(cmd, false, null); }
+function fmtBlock(tag){
+  document.execCommand('formatBlock', false, tag);
+}
+function edCount(blockId){ /* задел под счётчик, пока просто hook */ }
+
+function fileChip(f, blockId, idx, locked){
+  const kb = f.size ? (f.size > 1048576 ? (f.size/1048576).toFixed(1)+' МБ' : Math.round(f.size/1024)+' КБ') : '';
+  const icon = /\.(mp4|mov|webm)$/i.test(f.name) ? '🎬'
+             : /\.(jpg|jpeg|png|webp|gif)$/i.test(f.name) ? '🖼️'
+             : /\.pdf$/i.test(f.name) ? '📕'
+             : /\.(doc|docx)$/i.test(f.name) ? '📘'
+             : /\.(ppt|pptx)$/i.test(f.name) ? '📙' : '📄';
+  return `<div class="fchip" data-idx="${idx}">
+    <span>${icon} ${esc(f.name)}${kb ? ` · ${kb}` : ''}</span>
+    ${locked ? '' : `<button type="button" onclick="removeFile('${blockId}',${idx})" title="Удалить">✕</button>`}
+  </div>`;
+}
+
+async function pickFiles(blockId){
+  const input = document.getElementById('file-' + blockId);
+  const picked = [...input.files];
+  input.value = '';
+  edFiles[blockId] = edFiles[blockId] || [];
+
+  for (const file of picked) {
+    if (edFiles[blockId].length >= 3) { alert('Можно прикрепить не более 3 файлов.'); break; }
+    if (file.size > 52428800) { alert(`«${file.name}» больше 50 МБ. Видео длиннее 5 минут прикрепите ссылкой в тексте.`); continue; }
+    edFiles[blockId].push({ file, name: file.name, size: file.size, type: file.type, uploaded: false });
+  }
+  redrawFiles(blockId);
+}
+
+function removeFile(blockId, idx){
+  edFiles[blockId]?.splice(idx, 1);
+  redrawFiles(blockId);
+}
+
+function redrawFiles(blockId){
+  const box = document.getElementById('files-' + blockId);
+  box.innerHTML = (edFiles[blockId] || []).map((f, i) => fileChip(f, blockId, i, false)).join('');
+}
+
 async function submitTask(blockId){
-  const text = document.getElementById('task-' + blockId).value.trim();
-  if (!text) { alert('Напишите ответ.'); return; }
-  const { error } = await sb.rpc('learn_submit_block',
-    { p_block_id: blockId, p_answers: { text } });
-  if (error) { alert('Не получилось: ' + error.message); return; }
-  await refreshLesson();
+  const ed = document.getElementById('task-' + blockId);
+  const html = ed.innerHTML.trim();
+  const list = edFiles[blockId] || [];
+  if ((!html || html === '<br>') && !list.length) { alert('Напишите ответ или прикрепите файл.'); return; }
+
+  const btn = document.getElementById('taskBtn-' + blockId);
+  if (btn) { btn.disabled = true; btn.textContent = 'Отправляю…'; }
+
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    const uid = session.user.id;
+    const files = [];
+    for (const f of list) {
+      if (f.uploaded && f.path) { files.push({ path: f.path, name: f.name, size: f.size, type: f.type }); continue; }
+      const safe = f.name.replace(/[^\w.\-]+/g, '_');
+      const path = `${uid}/${blockId}/${Date.now()}_${safe}`;
+      const { error: upErr } = await sb.storage.from('learn-tasks').upload(path, f.file, { upsert: false });
+      if (upErr) throw upErr;
+      f.uploaded = true; f.path = path;
+      files.push({ path, name: f.name, size: f.size, type: f.type });
+    }
+
+    const { error } = await sb.rpc('learn_submit_block',
+      { p_block_id: blockId, p_answers: { html, files } });
+    if (error) throw error;
+    await refreshLesson();
+  } catch (e) {
+    alert('Не получилось отправить: ' + (e.message || e));
+    if (btn) { btn.disabled = false; btn.textContent = 'Отправить на проверку'; }
+  }
 }
 
 async function finishLesson(){
