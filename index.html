@@ -140,6 +140,9 @@ button{font-family:inherit;cursor:pointer}
 .rec-box.prep .rec-time{color:#C2410C}
 .rec-dot{width:16px;height:16px;border-radius:50%;background:var(--red);animation:pulse 1s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+#leaveModal{display:none;position:fixed;inset:0;z-index:100;align-items:center;justify-content:center;padding:20px}
+#leaveModal .lm-back{position:absolute;inset:0;background:rgba(45,45,63,.55);backdrop-filter:blur(3px)}
+#leaveModal .lm-box{position:relative;background:#fff;border-radius:var(--radius-lg);padding:32px 30px;max-width:420px;width:100%;text-align:center;box-shadow:var(--shadow)}
 
 .btn{background:linear-gradient(135deg,var(--purple),var(--purple-dark));color:#fff;border:none;
   border-radius:999px;padding:14px 32px;font-weight:800;font-size:15.5px;box-shadow:var(--shadow)}
@@ -163,7 +166,7 @@ button{font-family:inherit;cursor:pointer}
 
 <header class="header">
   <div class="wrap">
-    <a class="logo" href="#" onclick="showCatalog();return false">🦉 WowSpeak Learn</a>
+    <a class="logo" href="#" onclick="go('');return false">🦉 WowSpeak Learn</a>
     <div class="me" id="me"></div>
   </div>
 </header>
@@ -192,13 +195,13 @@ button{font-family:inherit;cursor:pointer}
 
   <!-- Курс -->
   <div id="course">
-    <a class="back" href="#" onclick="showCatalog();return false">← Все курсы</a>
+    <a class="back" href="#" onclick="go('');return false">← Все курсы</a>
     <div id="courseBody"></div>
   </div>
 
   <!-- Урок -->
   <div id="lesson">
-    <a class="back" href="#" onclick="openCourse(currentCourse);return false">← К курсу</a>
+    <a class="back" href="#" onclick="go('course/'+currentCourse);return false">← К курсу</a>
     <div id="lessonBody"></div>
   </div>
 
@@ -227,13 +230,81 @@ let edFiles = {};   // { blockId: [ {file, path, name, size, type, uploaded} ] }
 
 // ============ Вход ============
 document.addEventListener('DOMContentLoaded', init);
+let sessionReady = false;
+let dirty = false;   // есть несохранённые изменения на экране пробника/задания
+
+// защита от случайного закрытия вкладки / перезагрузки
+window.addEventListener('beforeunload', (e) => {
+  if (dirty) { e.preventDefault(); e.returnValue = ''; }
+});
+// пометка «есть изменения» — вешаем на ввод в полях
+function markDirty(){ dirty = true; }
+function clearDirty(){ dirty = false; }
+
 async function init(){
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { show('login'); return; }
+  sessionReady = true;
   document.getElementById('me').innerHTML =
     `${esc(session.user.email)} · <button onclick="logout()">Выйти</button>`;
-  showCatalog();
+  route();                          // открыть экран из текущего хеша
 }
+
+// ===== Хеш-роутинг =====
+window.addEventListener('hashchange', route);
+let pendingHash = null;
+function route(){
+  if (!sessionReady) return;
+  // если уходим с урока с несохранёнными изменениями — спросить
+  if (dirty && document.getElementById('lesson').style.display === 'block') {
+    pendingHash = location.hash;
+    // временно вернём прежний хеш, покажем модалку
+    history.pushState(null, '', pendingHash);
+    showLeaveConfirm();
+    return;
+  }
+  applyRoute();
+}
+function applyRoute(){
+  const h = decodeURIComponent(location.hash.replace(/^#/, ''));
+  const parts = h.split('/').filter(Boolean);
+  if (parts[0] === 'course' && parts[1]) { openCourse(parts[1], true); return; }
+  if (parts[0] === 'lesson' && parts[1] && parts[2]) { openLessonRoute(parts[1], parts[2]); return; }
+  showCatalog(true);
+}
+function go(hash){ location.hash = hash; }
+
+function showLeaveConfirm(){
+  let m = document.getElementById('leaveModal');
+  if (!m) {
+    m = document.createElement('div');
+    m.id = 'leaveModal';
+    m.innerHTML = `<div class="lm-back"></div>
+      <div class="lm-box">
+        <div style="font-size:40px">⚠️</div>
+        <h2 style="font-size:20px;margin:8px 0">Выйти без отправки?</h2>
+        <p style="color:var(--gray);font-size:14.5px;margin-bottom:20px">
+          У вас есть заполненные, но <b>не отправленные</b> ответы. Если выйти сейчас, они не сохранятся.</p>
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+          <button class="btn btn-ghost" onclick="cancelLeave()">Остаться</button>
+          <button class="btn" style="background:var(--red)" onclick="confirmLeave()">Выйти без сохранения</button>
+        </div>
+      </div>`;
+    document.body.appendChild(m);
+  }
+  m.style.display = 'flex';
+}
+function cancelLeave(){
+  document.getElementById('leaveModal').style.display = 'none';
+  pendingHash = null;
+}
+function confirmLeave(){
+  document.getElementById('leaveModal').style.display = 'none';
+  clearDirty();
+  if (pendingHash != null) { location.hash = pendingHash; pendingHash = null; }
+  applyRoute();
+}
+
 function show(id){
   ['login','catalog','course','lesson'].forEach(k =>
     document.getElementById(k).style.display = k === id ? 'block' : 'none');
@@ -258,7 +329,8 @@ async function doLogin(){
 async function logout(){ await sb.auth.signOut(); location.reload(); }
 
 // ============ Каталог ============
-async function showCatalog(){
+async function showCatalog(fromRoute){
+  if (!fromRoute) { go(''); return; }
   show('catalog');
   const { data, error } = await sb.rpc('learn_my_courses');
   const grid = document.getElementById('courseGrid');
@@ -266,7 +338,7 @@ async function showCatalog(){
   if (!data.length) { grid.innerHTML = '<div class="loading">Курсов пока нет 🦉</div>'; return; }
   grid.innerHTML = data.map(c => {
     const pct = c.total_lessons ? Math.round(c.done_lessons * 100 / c.total_lessons) : 0;
-    return `<div class="course" onclick="openCourse('${c.slug}')">
+    return `<div class="course" onclick="go('course/${c.slug}')">
       <div class="emo">${c.emoji || '📚'}</div>
       <h3>${esc(c.title)}</h3>
       <div class="sub">${esc(c.subtitle || '')}</div>
@@ -279,7 +351,8 @@ async function showCatalog(){
 }
 
 // ============ Курс ============
-async function openCourse(slug){
+async function openCourse(slug, fromRoute){
+  if (!fromRoute) { go('course/'+slug); return; }
   currentCourse = slug;
   show('course');
   const body = document.getElementById('courseBody');
@@ -320,7 +393,7 @@ async function openCourse(slug){
 
     ${(data.lessons||[]).map((l, i) => `
       <div class="lesson-item ${l.done_at?'done':''} ${l.locked?'locked':''}"
-           onclick="${l.locked ? '' : `openLesson('${l.slug}')`}">
+           onclick="${l.locked ? '' : `go('lesson/${currentCourse}/${l.slug}')`}">
         <div class="n">${l.done_at ? '✓' : (l.locked ? '🔒' : i+1)}</div>
         <div class="t"><b>${esc(l.title)}</b>
           <span>${esc(l.summary || '')}${l.score != null ? ` · результат ${l.score}%` : ''}</span></div>
@@ -331,9 +404,27 @@ async function openCourse(slug){
 
 // ============ Урок ============
 let currentLesson = null;
+// открыть урок из роутера: сначала грузим курс, если он ещё не загружен
+async function openLessonRoute(courseSlug, lessonSlug){
+  if (currentCourse !== courseSlug || !currentCourseData) {
+    currentCourse = courseSlug;
+    await sb.rpc('learn_enroll', { p_course_slug: courseSlug });
+    const { data } = await sb.rpc('learn_course_view', { p_course_slug: courseSlug });
+    currentCourseData = data;
+  }
+  renderLesson(lessonSlug);
+}
+
 function openLesson(slug){
-  const l = (currentCourseData.lessons||[]).find(x => x.slug === slug);
-  if (!l || l.locked) return;
+  // клик по уроку — меняем хеш, роутер отрисует
+  go('lesson/' + currentCourse + '/' + slug);
+}
+
+function renderLesson(slug){
+  clearDirty();
+  const l = (currentCourseData?.lessons||[]).find(x => x.slug === slug);
+  if (!l) { go('course/' + currentCourse); return; }
+  if (l.locked) { go('course/' + currentCourse); return; }
   currentLesson = l;
   show('lesson');
   const body = document.getElementById('lessonBody');
@@ -346,6 +437,9 @@ function openLesson(slug){
         ? '<div class="note ok">✅ Урок пройден</div>'
         : `<button class="btn btn-green" onclick="finishLesson()">Завершить урок ✓</button>`}
     </div>`;
+  // любое редактирование в уроке помечает «есть несохранённое»
+  body.addEventListener('input', markDirty);
+  body.addEventListener('change', markDirty);
 }
 
 function renderBlock(b){
@@ -916,7 +1010,7 @@ async function submitExact(blockId){
   });
   const { data, error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: answers });
   if (error) { alert('Не получилось: ' + error.message); return; }
-  await refreshLesson();
+  clearDirty(); await refreshLesson();
 }
 
 async function submitQuiz(blockId){
@@ -930,7 +1024,7 @@ async function submitQuiz(blockId){
   });
   const { data, error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: answers });
   if (error) { alert('Не получилось: ' + error.message); return; }
-  await refreshLesson();
+  clearDirty(); await refreshLesson();
 }
 
 // ===== Редактор заданий =====
@@ -1003,7 +1097,7 @@ async function submitTask(blockId){
     const { error } = await sb.rpc('learn_submit_block',
       { p_block_id: blockId, p_answers: { html, files } });
     if (error) throw error;
-    await refreshLesson();
+    clearDirty(); await refreshLesson();
   } catch (e) {
     alert('Не получилось отправить: ' + (e.message || e));
     if (btn) { btn.disabled = false; btn.textContent = 'Отправить на проверку'; }
@@ -1030,7 +1124,7 @@ async function refreshLesson(){
   const { data } = await sb.rpc('learn_course_view', { p_course_slug: currentCourse });
   currentCourseData = data;
   const l = (data.lessons||[]).find(x => x.slug === currentLesson.slug);
-  if (l) { currentLesson = l; openLesson(l.slug); }
+  if (l) { currentLesson = l; renderLesson(l.slug); }
 }
 
 function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
