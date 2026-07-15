@@ -127,6 +127,9 @@ button{font-family:inherit;cursor:pointer}
 
 /* пробник */
 .exam-head{background:#fff;border:2px solid var(--purple);border-radius:var(--radius-lg);padding:22px 26px;margin-bottom:18px}
+.exam-divider{display:flex;align-items:center;gap:14px;margin:28px 0 16px}
+.exam-divider:before,.exam-divider:after{content:'';flex:1;height:2px;background:var(--cream-dark)}
+.exam-divider span{font-family:'Fredoka',sans-serif;font-weight:600;font-size:17px;color:var(--purple-dark);white-space:nowrap}
 .q .bad{font-size:12px;font-weight:800;color:var(--red);background:var(--red-light);border-radius:999px;padding:2px 10px;margin-left:8px}
 .q .good{font-size:12px;font-weight:800;color:#15803D;background:var(--green-light);border-radius:999px;padding:2px 10px;margin-left:8px}
 .wr-tabs{display:flex;gap:8px;margin:14px 0 12px}
@@ -305,10 +308,10 @@ function confirmLeave(){
   applyRoute();
 }
 
-function show(id){
+function show(id, noScroll){
   ['login','catalog','course','lesson'].forEach(k =>
     document.getElementById(k).style.display = k === id ? 'block' : 'none');
-  window.scrollTo({ top: 0 });
+  if (!noScroll) window.scrollTo({ top: 0 });
 }
 async function doLogin(){
   const msg = document.getElementById('loginMsg');
@@ -420,13 +423,13 @@ function openLesson(slug){
   go('lesson/' + currentCourse + '/' + slug);
 }
 
-function renderLesson(slug){
+function renderLesson(slug, keepScroll){
   clearDirty();
   const l = (currentCourseData?.lessons||[]).find(x => x.slug === slug);
   if (!l) { go('course/' + currentCourse); return; }
   if (l.locked) { go('course/' + currentCourse); return; }
   currentLesson = l;
-  show('lesson');
+  show('lesson', keepScroll);
   const body = document.getElementById('lessonBody');
   body.innerHTML = `
     <h1 style="font-size:clamp(22px,3.5vw,28px);margin-bottom:6px">${esc(l.title)}</h1>
@@ -657,7 +660,8 @@ function pickMime(){
 async function startSpeaking(blockId, task){
   const stage = document.getElementById(`sp-stage-${blockId}-${task.id}`);
   stage.style.display = 'block';
-  stage.scrollIntoView({ behavior:'smooth', block:'center' });
+  const r = stage.getBoundingClientRect();
+  if (r.top < 0 || r.bottom > window.innerHeight) stage.scrollIntoView({ behavior:'smooth', block:'center' });
 
   // запрос микрофона
   try {
@@ -672,6 +676,12 @@ async function startSpeaking(blockId, task){
     return;
   }
 
+  // режим задания 3: аудио-вопросы играют, микрофон пишет параллельно
+  if (task.audio_path) {
+    await runAudioParallel(blockId, task, mime, stage);
+    return;
+  }
+
   // серия (perItemSec × items) или одиночная (maxDurationSec)
   const isSeries = !!task.perItemSec;
   const items = isSeries ? (task.items || 1) : 1;
@@ -680,6 +690,68 @@ async function startSpeaking(blockId, task){
 
   await runSpeakingStep(blockId, task, mime, 1, items, stage);
 }
+
+// Задание 3: непрерывная запись, поверх играет аудио с вопросами
+async function runAudioParallel(blockId, task, mime, stage){
+  window.__recBlobs = window.__recBlobs || {};
+  window.__recBlobs[task.id] = [];
+
+  const src = mediaUrl(task.audio_path);
+  const audio = new Audio(src);
+  audio.preload = 'auto';
+
+  // подготовка перед стартом (если задана)
+  if (task.prepSec > 0) {
+    await countdown(stage, task.prepSec, '⏳ Подготовка', 'Задание 3',
+      'Сейчас начнётся аудио с вопросами. Отвечайте после каждого — микрофон уже пишет.');
+  }
+
+  await new Promise((resolve) => {
+    recChunks = [];
+    mediaRec = new MediaRecorder(mediaStream, { mimeType: mime });
+    mediaRec.ondataavailable = e => { if (e.data.size) recChunks.push(e.data); };
+    mediaRec.onstop = () => {
+      window.__recBlobs[task.id].push(new Blob(recChunks, { type: mime }));
+      resolve();
+    };
+    mediaRec.start();
+
+    stage.innerHTML = `
+      <div class="rec-box">
+        <div class="rec-dot"></div>
+        <div style="font-weight:800;font-size:15px">🎧 Интервью идёт — отвечайте на вопросы</div>
+        <div class="rec-time" id="rec-time">0:00</div>
+        <div style="font-size:13px;color:var(--gray)">Аудио остановится само. Микрофон пишет всё время.</div>
+      </div>`;
+
+    let elapsed = 0;
+    recTimer = setInterval(() => {
+      elapsed++;
+      const el = document.getElementById('rec-time');
+      if (el) el.textContent = fmtSec(elapsed);
+    }, 1000);
+
+    // старт аудио; по окончании — стоп записи
+    audio.addEventListener('ended', () => {
+      clearInterval(recTimer);
+      try { mediaRec.stop(); } catch(_){}
+    });
+    // запрет перемотки аудио
+    let lastT = 0;
+    audio.addEventListener('timeupdate', () => {
+      if (audio.currentTime > lastT + 0.5) audio.currentTime = lastT; else lastT = audio.currentTime;
+    });
+    audio.play().catch(() => {
+      // если автоплей заблокирован — не страшно, запись идёт, ученик слышит после клика
+      clearInterval(recTimer);
+      try { mediaRec.stop(); } catch(_){}
+    });
+  });
+
+  finishSpeaking(blockId, task, mime, stage);
+}
+
+function __speakingSeriesEntry(){ /* маркер */ }
 
 async function runSpeakingStep(blockId, task, mime, step, total, stage){
   const isSeries = !!task.perItemSec;
@@ -797,7 +869,10 @@ function renderExam(b){
       ${p.intro_html ? `<div class="block-text">${p.intro_html}</div>` : ''}
       ${p.written_timer_sec ? `<div class="note info" style="margin-top:14px">⏱ Письменная часть: ${Math.round(p.written_timer_sec/60)} минут. Таймер появится на следующем шаге разработки.</div>` : ''}
     </div>
-    ${secs.map((sec, si) => renderSection(b.id, sec, si, st)).join('')}
+    ${secs.map((sec, si) => {
+      const div = sec.divider ? `<div class="exam-divider"><span>${esc(sec.divider)}</span></div>` : '';
+      return div + renderSection(b.id, sec, si, st);
+    }).join('')}
   </div>`;
 }
 
@@ -852,8 +927,11 @@ function renderSection(blockId, sec, si, st){
     const key = 'writing_' + si;
     const s = st[key];
     const done = s?.review_status;
+    const imgs = (sec.images || (sec.image ? [sec.image] : [])).map(p =>
+      `<img src="${esc(mediaUrl(p))}" style="max-width:100%;border-radius:12px;margin:10px 0;border:1px solid var(--cream-dark)">`).join('');
     return sectionWrap('✍️', sec.title, null, `
       <div class="block-text">${sec.prompt_html || ''}</div>
+      ${imgs}
       ${sec.min_words||sec.max_words?`<div style="font-size:12.5px;color:var(--gray);margin:8px 0">Объём: ${sec.min_words||''}–${sec.max_words||''} слов</div>`:''}
       <div class="wr-tabs">
         <button class="wr-tab on" onclick="wrTab('${blockId}','${key}','typed',this)">⌨️ Напечатать</button>
@@ -881,14 +959,17 @@ function renderSection(blockId, sec, si, st){
           const key = 'speaking_' + t.id;
           const s = st2[key];
           const done = s?.review_status || (s?.has_file ? 'pending' : null);
+          const imgs = (t.images || (t.image ? [t.image] : [])).map(pth =>
+            `<img src="${esc(mediaUrl(pth))}" style="max-width:100%;border-radius:10px;margin:8px 0;border:1px solid var(--cream-dark)">`).join('');
+          const modeHint = t.audio_path ? '🎧 Аудио + запись одновременно'
+            : t.perItemSec ? `${t.items} ответов по ${t.perItemSec}с`
+            : `запись до ${t.maxDurationSec}с`;
           return `<div class="sp-task" id="sp-${blockId}-${t.id}">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
               <div style="flex:1;min-width:200px">
                 <b style="font-size:15px">${esc(t.label)}</b>
                 <div style="font-size:12.5px;color:var(--gray);margin-top:3px">
-                  ${t.prepSec?`⏱ подготовка ${t.prepSec}с · `:''}${
-                    t.perItemSec?`${t.items} ответов по ${t.perItemSec}с`:`запись до ${t.maxDurationSec}с`}
-                  ${t.allowReRecord===false?' · без перезаписи':''}
+                  ${t.prepSec?`⏱ подготовка ${t.prepSec}с · `:''}${modeHint}${t.allowReRecord===false?' · без перезаписи':''}
                 </div>
               </div>
               ${done==='pending'||done==='approved'
@@ -896,6 +977,8 @@ function renderSection(blockId, sec, si, st){
                 : `<button class="btn" style="padding:10px 20px;font-size:14px"
                      onclick='startSpeaking("${blockId}", ${JSON.stringify(t).replace(/'/g,"&#39;")})'>▶ Начать</button>`}
             </div>
+            ${t.prompt_html ? `<div class="block-text" style="margin-top:10px;font-size:14px">${t.prompt_html}</div>` : ''}
+            ${imgs}
             ${done==='rejected'?`<div class="note err" style="margin-top:10px">✏️ ${s.note?esc(s.note):'на доработку'}</div>`:''}
             <div class="sp-stage" id="sp-stage-${blockId}-${t.id}" style="display:none"></div>
           </div>`;
@@ -1121,10 +1204,12 @@ async function finishLesson(){
 }
 
 async function refreshLesson(){
+  const scrollY = window.scrollY;   // запомнить позицию
   const { data } = await sb.rpc('learn_course_view', { p_course_slug: currentCourse });
   currentCourseData = data;
   const l = (data.lessons||[]).find(x => x.slug === currentLesson.slug);
-  if (l) { currentLesson = l; renderLesson(l.slug); }
+  if (l) { currentLesson = l; renderLesson(l.slug, true); }   // true = не скроллить наверх
+  window.scrollTo({ top: scrollY });                          // вернуть позицию
 }
 
 function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
