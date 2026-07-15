@@ -158,6 +158,14 @@ button{font-family:inherit;cursor:pointer}
 .map-badge.ok{background:var(--green-light);color:#15803D}
 .map-badge.bad{background:var(--red-light);color:var(--red)}
 .map-badge.wait{background:#FFF0E4;color:#C2410C}
+.rev-tabs{display:flex;gap:8px;margin-bottom:20px}
+.rev-tab{border:2px solid var(--cream-dark);background:#fff;border-radius:999px;padding:9px 18px;font-size:14px;font-weight:800;color:var(--gray)}
+.rev-tab.on{border-color:var(--purple);background:var(--purple-light);color:var(--purple-dark)}
+.rev-dot{background:var(--red);color:#fff;border-radius:999px;padding:1px 7px;font-size:11px;margin-left:4px}
+.rev-card{background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;padding:18px 20px;margin-bottom:16px}
+.rev-answer{background:#F8F6FF;border-radius:10px;padding:14px 16px;margin-top:12px;font-size:14.5px;line-height:1.6;white-space:pre-wrap}
+.rev-notif{background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:14px 16px;margin-bottom:10px}
+.rev-notif.unread{border-left:4px solid var(--purple);background:#FBFAFF}
 .rec-box{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px;margin-top:14px;border:2px solid var(--purple);border-radius:var(--radius);background:var(--purple-light);text-align:center}
 .rec-box.prep{border-color:var(--orange);background:var(--orange-light)}
 .rec-time{font-family:'Fredoka',sans-serif;font-size:40px;font-weight:600;color:var(--purple-dark);line-height:1}
@@ -235,6 +243,12 @@ button{font-family:inherit;cursor:pointer}
     <div id="mapBody"></div>
   </div>
 
+  <!-- Кабинет методиста -->
+  <div id="review">
+    <a class="back" href="#" onclick="go('');return false">← Все курсы</a>
+    <div id="reviewBody"></div>
+  </div>
+
 </div>
 
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
@@ -275,8 +289,12 @@ async function init(){
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { show('login'); return; }
   sessionReady = true;
+  // проверяем, методист ли (для показа кабинета проверки)
+  const { data: isEditor } = await sb.rpc('learn_is_editor');
+  window.__isEditor = !!isEditor;
   document.getElementById('me').innerHTML =
-    `${esc(session.user.email)} · <button onclick="logout()">Выйти</button>`;
+    `${isEditor ? `<a href="#" onclick="go('review');return false" style="margin-right:14px;font-weight:700;color:var(--purple-dark)">✅ Проверка работ</a>` : ''}`
+    + `${esc(session.user.email)} · <button onclick="logout()">Выйти</button>`;
   route();                          // открыть экран из текущего хеша
 }
 
@@ -300,6 +318,7 @@ function applyRoute(){
   const parts = h.split('/').filter(Boolean);
   if (parts[0] === 'course' && parts[1]) { openCourse(parts[1], true); return; }
   if (parts[0] === 'map' && parts[1]) { openCourseMap(parts[1]); return; }
+  if (parts[0] === 'review') { openReviewCabinet(); return; }
   if (parts[0] === 'lesson' && parts[1] && parts[2]) { openLessonRoute(parts[1], parts[2]); return; }
   showCatalog(true);
 }
@@ -337,7 +356,7 @@ function confirmLeave(){
 }
 
 function show(id, noScroll){
-  ['login','catalog','course','lesson','map'].forEach(k =>
+  ['login','catalog','course','lesson','map','review'].forEach(k =>
     document.getElementById(k).style.display = k === id ? 'block' : 'none');
   if (!noScroll) window.scrollTo({ top: 0 });
 }
@@ -451,6 +470,130 @@ async function openLessonRoute(courseSlug, lessonSlug){
 function openLesson(slug){
   // клик по уроку — меняем хеш, роутер отрисует
   go('lesson/' + currentCourse + '/' + slug);
+}
+
+// ===== Кабинет методиста =====
+let reviewTab = 'queue';
+async function openReviewCabinet(){
+  if (!window.__isEditor) { go(''); return; }
+  show('review');
+  const body = document.getElementById('reviewBody');
+  body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Загружаю…</div>';
+  const [{ data: reviews }, { data: notifs }] = await Promise.all([
+    sb.rpc('learn_pending_reviews'),
+    sb.rpc('learn_methodist_notifications', { p_limit: 50 })
+  ]);
+  window.__reviews = reviews || [];
+  window.__notifs = notifs || [];
+  renderReviewCabinet();
+}
+
+function renderReviewCabinet(){
+  const body = document.getElementById('reviewBody');
+  const reviews = window.__reviews || [];
+  const notifs = window.__notifs || [];
+  const unread = notifs.filter(n => !n.is_read).length;
+
+  body.innerHTML = `
+    <h1 style="font-size:32px;margin-bottom:16px">✅ Проверка работ</h1>
+    <div class="rev-tabs">
+      <button class="rev-tab ${reviewTab==='queue'?'on':''}" onclick="switchReviewTab('queue')">📋 Очередь (${reviews.length})</button>
+      <button class="rev-tab ${reviewTab==='notifs'?'on':''}" onclick="switchReviewTab('notifs')">🔔 Уведомления${unread?` <span class="rev-dot">${unread}</span>`:''}</button>
+    </div>
+    <div id="revContent"></div>`;
+  renderReviewContent();
+}
+
+function switchReviewTab(t){ reviewTab = t; renderReviewCabinet(); if (t==='notifs') markNotifsRead(); }
+
+async function markNotifsRead(){
+  await sb.rpc('learn_mark_notifications_read').catch(()=>{});
+}
+
+function renderReviewContent(){
+  const el = document.getElementById('revContent');
+  if (reviewTab === 'queue') {
+    const reviews = window.__reviews || [];
+    if (!reviews.length) { el.innerHTML = '<div class="note ok">🎉 Очередь пуста — все работы проверены.</div>'; return; }
+    // группируем по ученику + курсу
+    el.innerHTML = reviews.map((r, i) => renderReviewCard(r, i)).join('');
+    // подгружаем аудиоплееры для устных
+    reviews.forEach((r, i) => { if (r.has_file) loadReviewAudio(r, i); });
+  } else {
+    const notifs = window.__notifs || [];
+    if (!notifs.length) { el.innerHTML = '<div class="note">Уведомлений пока нет.</div>'; return; }
+    el.innerHTML = notifs.map(n => `
+      <div class="rev-notif ${n.is_read?'':'unread'}">
+        <div style="font-weight:800;font-size:14.5px">${esc(n.title)}</div>
+        <div style="font-size:13px;color:var(--gray);margin-top:4px">${esc(n.body||'')}</div>
+        <div style="font-size:11.5px;color:var(--gray);margin-top:6px">${new Date(n.created_at).toLocaleString('ru-RU',{timeZone:'Europe/Moscow'})} МСК${n.course?' · '+esc(n.course):''}</div>
+        ${n.kind==='access_suspended' && n.enrollment_id ? `<button class="btn" style="margin-top:10px;padding:8px 18px;font-size:13px" onclick="resumeAccess('${n.enrollment_id}')">Вернуть доступ</button>` : ''}
+      </div>`).join('');
+  }
+}
+
+function renderReviewCard(r, i){
+  const meta = r.meta || {};
+  let answerBlock = '';
+  if (r.kind === 'writing') {
+    const txt = r.answers?.text;
+    answerBlock = txt
+      ? `<div class="rev-answer">${esc(txt)}</div>`
+      : '<div style="font-size:13px;color:var(--gray)">📷 Ответ загружен фото/файлом (см. ниже)</div>';
+  } else if (r.kind === 'audio') {
+    answerBlock = `<div id="rev-audio-${i}" style="font-size:13px;color:var(--gray)">🎧 Загружаю запись…</div>`;
+  } else if (r.kind === 'text') {
+    answerBlock = `<div class="rev-answer">${esc(r.answers?.text||'')}</div>`;
+  }
+  const secLabel = r.section_key ? ` · ${esc(r.section_key)}` : '';
+  return `<div class="rev-card" id="rev-card-${i}">
+    <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div>
+        <div style="font-weight:800;font-size:16px">${esc(r.student||'—')}</div>
+        <div style="font-size:12.5px;color:var(--gray)">${esc(r.course||'')} · ${esc(r.lesson||'')}${secLabel}</div>
+      </div>
+      <div style="font-size:12px;color:var(--gray)">${new Date(r.submitted_at).toLocaleString('ru-RU',{timeZone:'Europe/Moscow'})} МСК</div>
+    </div>
+    ${answerBlock}
+    <textarea id="rev-note-${i}" placeholder="Комментарий (необязательно для «Принять», обязателен для «Вернуть»)"
+      style="width:100%;min-height:60px;padding:10px 12px;border:2px solid var(--cream-dark);border-radius:10px;font-size:14px;background:#FDFCF8;margin-top:12px;resize:vertical"></textarea>
+    <div style="display:flex;gap:10px;margin-top:10px">
+      <button class="btn btn-green" style="padding:10px 22px" onclick="reviewAct('${r.id}',true,${i})">✓ Принять</button>
+      <button class="btn" style="padding:10px 22px;background:var(--orange)" onclick="reviewAct('${r.id}',false,${i})">↩ Вернуть на доработку</button>
+    </div>
+  </div>`;
+}
+
+async function loadReviewAudio(r, i){
+  const holder = document.getElementById(`rev-audio-${i}`);
+  if (!holder) return;
+  const paths = r.meta?.parts?.length ? r.meta.parts : (r.storage_path ? [r.storage_path] : []);
+  const urls = [];
+  for (const p of paths) {
+    try { const { data } = await sb.storage.from('learn-tasks').createSignedUrl(p, 3600);
+      if (data?.signedUrl) urls.push(data.signedUrl); } catch(_){}
+  }
+  holder.innerHTML = urls.length
+    ? '🎧 Запись:' + urls.map(u => `<audio controls src="${u}" style="width:100%;margin-top:6px"></audio>`).join('')
+    : '<span style="color:var(--gray)">Запись недоступна</span>';
+}
+
+async function reviewAct(id, approved, i){
+  const note = document.getElementById(`rev-note-${i}`)?.value.trim() || null;
+  if (!approved && !note) { alert('Для возврата на доработку добавьте комментарий.'); return; }
+  const { error } = await sb.rpc('learn_review_submission', { p_id: id, p_approved: approved, p_note: note });
+  if (error) { alert(error.message); return; }
+  // убираем карточку из очереди
+  window.__reviews = (window.__reviews||[]).filter(r => r.id !== id);
+  renderReviewCabinet();
+}
+
+async function resumeAccess(enrollmentId){
+  if (!confirm('Вернуть доступ к курсу этому преподавателю?')) return;
+  const { error } = await sb.rpc('learn_resume_access', { p_enrollment_id: enrollmentId });
+  if (error) { alert(error.message); return; }
+  alert('Доступ возвращён.');
+  openReviewCabinet();
 }
 
 // ===== Карта курса =====
