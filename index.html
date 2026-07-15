@@ -132,6 +132,14 @@ button{font-family:inherit;cursor:pointer}
 .wr-tabs{display:flex;gap:8px;margin:14px 0 12px}
 .wr-tab{border:2px solid var(--cream-dark);background:#fff;border-radius:999px;padding:8px 16px;font-size:13.5px;font-weight:800;color:var(--gray)}
 .wr-tab.on{border-color:var(--purple);background:var(--purple-light);color:var(--purple-dark)}
+.sp-task{border:2px solid var(--cream-dark);border-radius:var(--radius);padding:16px 18px}
+.sp-done{background:var(--green-light);color:#15803D;font-size:12px;font-weight:800;border-radius:999px;padding:6px 14px;white-space:nowrap}
+.rec-box{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px;margin-top:14px;border:2px solid var(--purple);border-radius:var(--radius);background:var(--purple-light);text-align:center}
+.rec-box.prep{border-color:var(--orange);background:var(--orange-light)}
+.rec-time{font-family:'Fredoka',sans-serif;font-size:40px;font-weight:600;color:var(--purple-dark);line-height:1}
+.rec-box.prep .rec-time{color:#C2410C}
+.rec-dot{width:16px;height:16px;border-radius:50%;background:var(--red);animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 
 .btn{background:linear-gradient(135deg,var(--purple),var(--purple-dark));color:#fff;border:none;
   border-radius:999px;padding:14px 32px;font-weight:800;font-size:15.5px;box-shadow:var(--shadow)}
@@ -493,6 +501,198 @@ function clearWrong(blockId){
 }
 
 // ===== Пробник (exam) =====
+// ===== Аудирование: плеер без перемотки, один раз =====
+function mediaUrl(path){
+  const { data } = sb.storage.from('learn-media').getPublicUrl(path);
+  return data.publicUrl;
+}
+
+async function playListening(blockId, src){
+  const wrap = document.getElementById('audio-wrap-' + blockId);
+  const audio = new Audio(src);
+  audio.preload = 'auto';
+
+  wrap.innerHTML = `
+    <div class="rec-box" style="border-color:var(--purple)">
+      <div style="font-weight:800;font-size:15px">🎧 Идёт аудирование</div>
+      <div class="rec-time" id="audio-time-${blockId}">0:00</div>
+      <div style="font-size:13px;color:var(--gray)">Перемотка и пауза недоступны. Не закрывайте страницу.</div>
+    </div>`;
+
+  // запрет перемотки: любой seek возвращаем назад
+  let lastTime = 0;
+  audio.addEventListener('timeupdate', () => {
+    if (audio.currentTime > lastTime + 0.5) { audio.currentTime = lastTime; }
+    else lastTime = audio.currentTime;
+    const el = document.getElementById('audio-time-' + blockId);
+    if (el) el.textContent = fmtSec(Math.floor(audio.currentTime));
+  });
+  audio.addEventListener('seeking', () => {
+    if (audio.currentTime > lastTime + 0.5) audio.currentTime = lastTime;
+  });
+  // запрет паузы (кроме конца)
+  audio.addEventListener('pause', () => {
+    if (!audio.ended) audio.play().catch(()=>{});
+  });
+
+  audio.addEventListener('ended', async () => {
+    wrap.innerHTML = '<div class="note ok">🎧 Аудирование завершено. Переходите к ответам ниже.</div>';
+    // фиксируем факт прослушивания
+    await sb.rpc('learn_submit_exam', {
+      p_block_id: blockId, p_section: 'audio', p_kind: 'text',
+      p_answers: { played: true }, p_meta: { played_at: new Date().toISOString() }
+    }).catch(()=>{});
+  });
+
+  try {
+    await audio.play();
+  } catch(e) {
+    wrap.innerHTML = `<div class="note err">Не удалось запустить аудио: ${esc(e.message||e)}<br>Проверьте соединение и обновите страницу.</div>`;
+  }
+}
+
+// ===== Запись микрофона (устная часть) =====
+let mediaStream = null, mediaRec = null, recChunks = [], recTimer = null, prepTimer = null;
+
+function pickMime(){
+  const cands = ['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg;codecs=opus'];
+  for (const m of cands) if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  return '';
+}
+
+async function startSpeaking(blockId, task){
+  const stage = document.getElementById(`sp-stage-${blockId}-${task.id}`);
+  stage.style.display = 'block';
+  stage.scrollIntoView({ behavior:'smooth', block:'center' });
+
+  // запрос микрофона
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch(e) {
+    stage.innerHTML = `<div class="note err">Не удалось получить доступ к микрофону. Разрешите доступ в браузере и попробуйте снова.<br>Либо запись можно приложить файлом ниже.</div>`;
+    return;
+  }
+  const mime = pickMime();
+  if (!mime) {
+    stage.innerHTML = `<div class="note err">Ваш браузер не поддерживает запись. Откройте пробник в Chrome или приложите готовый аудиофайл.</div>`;
+    return;
+  }
+
+  // серия (perItemSec × items) или одиночная (maxDurationSec)
+  const isSeries = !!task.perItemSec;
+  const items = isSeries ? (task.items || 1) : 1;
+  window.__recBlobs = window.__recBlobs || {};
+  window.__recBlobs[task.id] = [];
+
+  await runSpeakingStep(blockId, task, mime, 1, items, stage);
+}
+
+async function runSpeakingStep(blockId, task, mime, step, total, stage){
+  const isSeries = !!task.perItemSec;
+  const dur = isSeries ? task.perItemSec : (task.maxDurationSec || 60);
+  const label = total > 1 ? `Ответ ${step} из ${total}` : 'Запись';
+
+  // фаза подготовки (только перед первым шагом; у серий подготовка одна на всё задание)
+  const prep = (step === 1) ? (task.prepSec || 0) : 0;
+
+  if (prep > 0) {
+    await countdown(stage, prep, '⏳ Подготовка', label,
+      'Обдумайте ответ. Запись начнётся автоматически.');
+  }
+
+  // фаза записи
+  await new Promise((resolve) => {
+    recChunks = [];
+    mediaRec = new MediaRecorder(mediaStream, { mimeType: mime });
+    mediaRec.ondataavailable = e => { if (e.data.size) recChunks.push(e.data); };
+    mediaRec.onstop = () => {
+      const blob = new Blob(recChunks, { type: mime });
+      window.__recBlobs[task.id].push(blob);
+      resolve();
+    };
+    mediaRec.start();
+
+    let left = dur;
+    stage.innerHTML = `
+      <div class="rec-box">
+        <div class="rec-dot"></div>
+        <div style="font-weight:800;font-size:15px">${label} — идёт запись</div>
+        <div class="rec-time" id="rec-time">${fmtSec(left)}</div>
+        <button class="btn btn-ghost" style="padding:8px 18px" onclick="stopRec()">Стоп</button>
+      </div>`;
+    window.__stopRec = () => { try{ mediaRec.stop(); }catch(_){} clearInterval(recTimer); };
+    recTimer = setInterval(() => {
+      left--;
+      const el = document.getElementById('rec-time');
+      if (el) el.textContent = fmtSec(left);
+      if (left <= 0) { clearInterval(recTimer); window.__stopRec(); }
+    }, 1000);
+  });
+
+  // следующий шаг серии или финал
+  if (step < total) {
+    await runSpeakingStep(blockId, task, mime, step + 1, total, stage);
+  } else {
+    finishSpeaking(blockId, task, mime, stage);
+  }
+}
+
+function stopRec(){ if (window.__stopRec) window.__stopRec(); }
+
+function countdown(stage, sec, title, sub, hint){
+  return new Promise(resolve => {
+    let left = sec;
+    const draw = () => {
+      stage.innerHTML = `<div class="rec-box prep">
+        <div style="font-weight:800;font-size:15px">${title} · ${sub}</div>
+        <div class="rec-time">${fmtSec(left)}</div>
+        <div style="font-size:13px;color:var(--gray)">${hint||''}</div>
+        <button class="btn" style="padding:8px 18px" onclick="window.__skipPrep&&window.__skipPrep()">Готов, начать сейчас</button>
+      </div>`;
+    };
+    draw();
+    window.__skipPrep = () => { clearInterval(prepTimer); resolve(); };
+    prepTimer = setInterval(() => {
+      left--; 
+      if (left <= 0) { clearInterval(prepTimer); resolve(); }
+      else draw();
+    }, 1000);
+  });
+}
+
+async function finishSpeaking(blockId, task, mime, stage){
+  const blobs = window.__recBlobs[task.id] || [];
+  // склеиваем серию в один файл (простая конкатенация контейнеров webm работает для воспроизведения последовательно;
+  //  для надёжности грузим каждый ответ отдельным файлом с индексом)
+  stage.innerHTML = `<div class="rec-box"><div style="font-weight:800">⬆ Загружаю запись…</div></div>`;
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+
+  try {
+    const { data:{ session } } = await sb.auth.getSession();
+    const uid = session.user.id;
+    const ext = mime.includes('mp4') ? 'mp4' : mime.includes('ogg') ? 'ogg' : 'webm';
+    const paths = [];
+    for (let i = 0; i < blobs.length; i++) {
+      const path = `${uid}/${blockId}/speaking_${task.id}_${i+1}_${Date.now()}.${ext}`;
+      const { error: upErr } = await sb.storage.from('learn-tasks').upload(path, blobs[i], { contentType: mime });
+      if (upErr) throw upErr;
+      paths.push(path);
+    }
+    const { error } = await sb.rpc('learn_submit_exam', {
+      p_block_id: blockId, p_section: 'speaking_' + task.id, p_kind: 'audio',
+      p_answers: {}, p_storage: paths[0], p_mime: mime,
+      p_meta: { task: task.id, parts: paths, count: paths.length }
+    });
+    if (error) throw error;
+    stage.innerHTML = `<div class="note ok">✅ Запись отправлена методисту.</div>`;
+    setTimeout(refreshLesson, 800);
+  } catch(e) {
+    stage.innerHTML = `<div class="note err">Не удалось загрузить запись: ${esc(e.message||e)}</div>`;
+  }
+}
+
+function fmtSec(s){ s = Math.max(0, s); return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`; }
+
 function renderExam(b){
   const p = b.payload || {};
   const st = b.exam_state || {};
@@ -509,6 +709,20 @@ function renderExam(b){
 
 function renderSection(blockId, sec, si, st){
   const kind = sec.kind;
+  if (kind === 'audio') {
+    const s = st['audio'];
+    const played = s?.answers?.played || (s?.review_status != null);
+    const src = sec.url || (sec.path ? mediaUrl(sec.path) : '');
+    return sectionWrap('🎧', sec.title || 'Аудирование', sec.note || 'Аудио включается один раз и не перематывается — как на настоящем экзамене. Повторное прослушивание уже встроено в запись.', `
+      <div id="audio-wrap-${blockId}" style="text-align:center">
+        ${played
+          ? '<div class="note info">🎧 Аудирование прослушано. Повторный запуск недоступен.</div>'
+          : src
+            ? `<button class="btn" id="audio-btn-${blockId}" onclick="playListening('${blockId}','${esc(src)}')">▶ Включить аудирование</button>
+               <div style="font-size:12.5px;color:var(--gray);margin-top:10px">Убедитесь, что вы готовы: перемотка и пауза недоступны, запустить можно один раз.</div>`
+            : '<div class="note warn">Аудиофайл ещё не загружен организатором.</div>'}
+      </div>`);
+  }
   if (kind === 'auto_quiz') {
     const s = st['auto_quiz'];
     const res = s?.results || null;
@@ -566,11 +780,33 @@ function renderSection(blockId, sec, si, st){
       <button class="btn" style="margin-top:14px" onclick="submitWriting('${blockId}','${key}')">Отправить на проверку</button>`);
   }
   if (kind === 'speaking') {
+    const st2 = st;
     return sectionWrap('🎤', sec.title, sec.note, `
-      <div class="note info">Запись микрофона появится на следующем шаге разработки. Задания этой части:</div>
-      <ul style="margin:12px 0 0 20px;font-size:14px">
-        ${(sec.tasks||[]).map(t => `<li style="margin-bottom:6px">${esc(t.label)}</li>`).join('')}
-      </ul>`);
+      <div style="display:flex;flex-direction:column;gap:14px">
+        ${(sec.tasks||[]).map((t, ti) => {
+          const key = 'speaking_' + t.id;
+          const s = st2[key];
+          const done = s?.review_status || (s?.has_file ? 'pending' : null);
+          return `<div class="sp-task" id="sp-${blockId}-${t.id}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+              <div style="flex:1;min-width:200px">
+                <b style="font-size:15px">${esc(t.label)}</b>
+                <div style="font-size:12.5px;color:var(--gray);margin-top:3px">
+                  ${t.prepSec?`⏱ подготовка ${t.prepSec}с · `:''}${
+                    t.perItemSec?`${t.items} ответов по ${t.perItemSec}с`:`запись до ${t.maxDurationSec}с`}
+                  ${t.allowReRecord===false?' · без перезаписи':''}
+                </div>
+              </div>
+              ${done==='pending'||done==='approved'
+                ? `<span class="sp-done">✅ записано</span>`
+                : `<button class="btn" style="padding:10px 20px;font-size:14px"
+                     onclick='startSpeaking("${blockId}", ${JSON.stringify(t).replace(/'/g,"&#39;")})'>▶ Начать</button>`}
+            </div>
+            ${done==='rejected'?`<div class="note err" style="margin-top:10px">✏️ ${s.note?esc(s.note):'на доработку'}</div>`:''}
+            <div class="sp-stage" id="sp-stage-${blockId}-${t.id}" style="display:none"></div>
+          </div>`;
+        }).join('')}
+      </div>`);
   }
   if (kind === 'reflection') {
     const s = st['reflection'];
