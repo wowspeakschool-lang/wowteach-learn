@@ -394,6 +394,35 @@ function renderBlock(b){
         `<div style="margin-top:16px"><button class="btn" id="taskBtn-${b.id}" onclick="submitTask('${b.id}')">Отправить на проверку</button></div>`}
     </div></div>`;
   }
+  if (b.type === 'exact_input') {
+    const s = b.submission;
+    const ans = s?.answers || {};
+    const res = s?.results || null;
+    const wrong = res ? Object.values(res).filter(v => v === false).length : 0;
+    const pass = currentCourseData?.pass_score ?? 80;
+    const ok = s?.auto_score != null && s.auto_score >= pass;
+    return `<div class="block"><div class="qbox" id="exin-${b.id}">
+      <h3>⌨️ ${esc(p.title || 'Задания с вводом ответа')}</h3>
+      ${p.note ? `<div style="font-size:13px;color:var(--gray);margin-bottom:16px">${esc(p.note)}</div>` : ''}
+      ${(p.items||[]).map((it, ii) => {
+        const mark = res ? res[ii] : undefined;
+        const badge = mark === false
+          ? '<span style="font-size:12px;font-weight:800;color:var(--red);background:var(--red-light);border-radius:999px;padding:2px 10px;margin-left:8px">неверно</span>'
+          : mark === true
+          ? '<span style="font-size:12px;font-weight:800;color:#15803D;background:var(--green-light);border-radius:999px;padding:2px 10px;margin-left:8px">верно</span>' : '';
+        return `<div class="q" data-ii="${ii}" style="${mark===false?'border-left:3px solid var(--red);padding-left:12px':''}">
+          <div class="qt">${it.n != null ? it.n + '. ' : ''}${esc(it.prompt||'')}${badge}</div>
+          <input type="text" class="exin-field" data-ii="${ii}"
+            value="${esc(ans[ii] != null ? (Array.isArray(ans[ii]) ? ans[ii][0] : ans[ii]) : '')}"
+            placeholder="${it.kind === 'sequence' ? 'например: 632174' : 'ваш ответ'}"
+            autocomplete="off" autocapitalize="off" spellcheck="false"
+            style="width:100%;padding:11px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:15px;background:#FDFCF8;margin-top:6px;font-weight:700">
+        </div>`;
+      }).join('')}
+      ${s?.auto_score != null ? `<div class="note ${ok?'ok':'warn'}">Результат: <b>${s.auto_score}%</b>${wrong>0?` · ошибок: ${wrong} — исправьте отмеченные и проверьте снова`:' ✅'}</div>` : ''}
+      <div style="margin-top:16px"><button class="btn" onclick="submitExact('${b.id}')">${s?'Проверить ещё раз':'Проверить'}</button></div>
+    </div></div>`;
+  }
   if (b.type === 'quiz') {
     const s = b.submission;
     const answered = s?.answers != null;
@@ -452,6 +481,17 @@ function clearWrong(blockId){
       qEl.style.borderLeft = '3px solid var(--purple)';
     }
   });
+}
+
+async function submitExact(blockId){
+  const box = document.getElementById('exin-' + blockId);
+  const answers = {};
+  box.querySelectorAll('.exin-field').forEach(f => {
+    answers[f.dataset.ii] = f.value.trim();
+  });
+  const { data, error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: answers });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  await refreshLesson();
 }
 
 async function submitQuiz(blockId){
