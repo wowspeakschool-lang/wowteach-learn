@@ -148,6 +148,7 @@ button{font-family:inherit;cursor:pointer}
 .wr-tab.on{border-color:var(--purple);background:var(--purple-light);color:var(--purple-dark)}
 .sp-task{border:2px solid var(--cream-dark);border-radius:var(--radius);padding:16px 18px}
 .sp-done{background:var(--green-light);color:#15803D;font-size:12px;font-weight:800;border-radius:999px;padding:6px 14px;white-space:nowrap}
+.sp-locked{margin-top:12px;padding:16px 18px;background:#FBF7EE;border:1.5px dashed var(--cream-dark);border-radius:12px;font-size:13.5px;color:var(--gray);text-align:center}
 .rec-box{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px;margin-top:14px;border:2px solid var(--purple);border-radius:var(--radius);background:var(--purple-light);text-align:center}
 .rec-box.prep{border-color:var(--orange);background:var(--orange-light)}
 .rec-time{font-family:'Fredoka',sans-serif;font-size:40px;font-weight:600;color:var(--purple-dark);line-height:1}
@@ -699,6 +700,12 @@ function pickMime(){
 }
 
 async function startSpeaking(blockId, task){
+  // раскрыть материал задания (текст/картинки), если он был скрыт до старта
+  const material = document.getElementById(`sp-material-${blockId}-${task.id}`);
+  const locked = document.getElementById(`sp-locked-${blockId}-${task.id}`);
+  if (material) material.style.display = 'block';
+  if (locked) locked.style.display = 'none';
+
   const stage = document.getElementById(`sp-stage-${blockId}-${task.id}`);
   stage.style.display = 'block';
   const r = stage.getBoundingClientRect();
@@ -1136,8 +1143,16 @@ function renderSection(blockId, sec, si, st){
                 : `<button class="btn" style="padding:10px 20px;font-size:14px"
                      onclick='startSpeaking("${blockId}", ${JSON.stringify(t).replace(/'/g,"&#39;")})'>▶ Начать</button>`}
             </div>
-            ${t.prompt_html ? `<div class="block-text" style="margin-top:10px;font-size:14px">${t.prompt_html}</div>` : ''}
-            ${imgs}
+            ${(() => {
+              const material = `${t.prompt_html ? `<div class="block-text" style="margin-top:10px;font-size:14px">${t.prompt_html}</div>` : ''}${imgs}`;
+              const hideUntilStart = t.prepSec > 0 && !(done==='pending'||done==='approved');
+              if (!material) return '';
+              if (hideUntilStart) {
+                return `<div id="sp-material-${blockId}-${t.id}" style="display:none">${material}</div>
+                  <div id="sp-locked-${blockId}-${t.id}" class="sp-locked">🔒 Задание откроется, когда вы нажмёте «Начать» и пойдёт время на подготовку.</div>`;
+              }
+              return material;
+            })()}
             ${(s?.meta?.parts?.length || s?.storage_path) ? `<div id="sp-player-${blockId}-${t.id}" style="margin-top:12px"><div style="font-size:12.5px;color:var(--gray)">🎧 Загружаю вашу запись…</div></div>` : ''}
             ${done==='rejected'?`<div class="note err" style="margin-top:10px">✏️ ${s.note?esc(s.note):'на доработку'}</div>`:''}
             <div class="sp-stage" id="sp-stage-${blockId}-${t.id}" style="display:none"></div>
