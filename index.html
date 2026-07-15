@@ -166,6 +166,20 @@ button{font-family:inherit;cursor:pointer}
 .rev-answer{background:#F8F6FF;border-radius:10px;padding:14px 16px;margin-top:12px;font-size:14.5px;line-height:1.6;white-space:pre-wrap}
 .rev-notif{background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:14px 16px;margin-bottom:10px}
 .rev-notif.unread{border-left:4px solid var(--purple);background:#FBFAFF}
+.teach-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.teach-card{background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;padding:16px 18px;cursor:pointer;transition:border-color .15s}
+.teach-card:hover{border-color:var(--purple)}
+.teach-ava{width:44px;height:44px;border-radius:50%;background:var(--purple-light);color:var(--purple-dark);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;flex-shrink:0}
+.teach-chip{font-size:11.5px;font-weight:700;background:var(--cream);border-radius:999px;padding:3px 10px;color:var(--gray)}
+.teach-chip.ok{background:var(--green-light);color:#15803D}
+.teach-chip.warn{background:#FFF0E4;color:#C2410C}
+.teach-chip.bad{background:var(--red-light);color:var(--red)}
+.dos-head{display:flex;align-items:center;gap:16px;background:#fff;border:1.5px solid var(--cream-dark);border-radius:16px;padding:20px 24px}
+.dos-course{background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:14px 16px;margin-bottom:10px}
+.dos-hist{background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;overflow:hidden}
+.dos-hist-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--cream)}
+.dos-hist-row:last-child{border-bottom:none}
+.dos-note{background:#FBFAFF;border:1px solid var(--cream-dark);border-radius:10px;padding:12px 14px;margin-bottom:8px}
 .rec-box{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px;margin-top:14px;border:2px solid var(--purple);border-radius:var(--radius);background:var(--purple-light);text-align:center}
 .rec-box.prep{border-color:var(--orange);background:var(--orange-light)}
 .rec-time{font-family:'Fredoka',sans-serif;font-size:40px;font-weight:600;color:var(--purple-dark);line-height:1}
@@ -477,6 +491,7 @@ let reviewTab = 'queue';
 async function openReviewCabinet(){
   if (!window.__isEditor) { go(''); return; }
   show('review');
+  window.__teachers = null;   // сброс кэша списка преподавателей
   const body = document.getElementById('reviewBody');
   body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Загружаю…</div>';
   const [{ data: reviews }, { data: notifs }] = await Promise.all([
@@ -498,13 +513,14 @@ function renderReviewCabinet(){
     <h1 style="font-size:32px;margin-bottom:16px">✅ Проверка работ</h1>
     <div class="rev-tabs">
       <button class="rev-tab ${reviewTab==='queue'?'on':''}" onclick="switchReviewTab('queue')">📋 Очередь (${reviews.length})</button>
+      <button class="rev-tab ${reviewTab==='teachers'?'on':''}" onclick="switchReviewTab('teachers')">👥 Преподаватели</button>
       <button class="rev-tab ${reviewTab==='notifs'?'on':''}" onclick="switchReviewTab('notifs')">🔔 Уведомления${unread?` <span class="rev-dot">${unread}</span>`:''}</button>
     </div>
     <div id="revContent"></div>`;
   renderReviewContent();
 }
 
-function switchReviewTab(t){ reviewTab = t; renderReviewCabinet(); if (t==='notifs') markNotifsRead(); }
+function switchReviewTab(t){ reviewTab = t; renderReviewCabinet(); if (t==='notifs') markNotifsRead(); if (t==='teachers') loadTeachers(); }
 
 async function markNotifsRead(){
   await sb.rpc('learn_mark_notifications_read').catch(()=>{});
@@ -512,6 +528,7 @@ async function markNotifsRead(){
 
 function renderReviewContent(){
   const el = document.getElementById('revContent');
+  if (reviewTab === 'teachers') { renderTeachers(el); return; }
   if (reviewTab === 'queue') {
     const reviews = window.__reviews || [];
     if (!reviews.length) { el.innerHTML = '<div class="note ok">🎉 Очередь пуста — все работы проверены.</div>'; return; }
@@ -594,6 +611,130 @@ async function resumeAccess(enrollmentId){
   if (error) { alert(error.message); return; }
   alert('Доступ возвращён.');
   openReviewCabinet();
+}
+
+// ===== Преподаватели (досье) =====
+async function loadTeachers(){
+  if (window.__teachers) return;   // уже загружены
+  const { data } = await sb.rpc('learn_teachers_list');
+  window.__teachers = data || [];
+  if (reviewTab === 'teachers') renderReviewContent();
+}
+
+function renderTeachers(el){
+  const ts = window.__teachers;
+  if (!ts) { el.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray)">Загружаю…</div>'; return; }
+  if (!ts.length) { el.innerHTML = '<div class="note">Преподавателей не найдено.</div>'; return; }
+  el.innerHTML = `<div class="teach-grid">${ts.map(t => `
+    <div class="teach-card" onclick="openDossier('${t.id}')">
+      <div style="display:flex;align-items:center;gap:12px">
+        ${t.avatar_url ? `<img src="${esc(t.avatar_url)}" style="width:44px;height:44px;border-radius:50%;object-fit:cover">`
+          : `<div class="teach-ava">${esc((t.name||'?').charAt(0))}</div>`}
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:800;font-size:15px">${esc(t.name||'—')}</div>
+          <div style="font-size:12px;color:var(--gray);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.email||'')}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">
+        <span class="teach-chip">${t.courses_done}/${t.courses_total} курсов</span>
+        ${t.pending_reviews>0?`<span class="teach-chip warn">${t.pending_reviews} на проверке</span>`:''}
+        ${t.missed>0?`<span class="teach-chip bad">${t.missed} пропуск.</span>`:''}
+        ${t.suspended?`<span class="teach-chip bad">приостановлен</span>`:''}
+      </div>
+    </div>`).join('')}</div>`;
+}
+
+async function openDossier(teacherId){
+  const el = document.getElementById('revContent');
+  el.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray)">Загружаю досье…</div>';
+  const { data, error } = await sb.rpc('learn_teacher_dossier', { p_teacher_id: teacherId });
+  if (error) { el.innerHTML = '<div class="note warn">'+esc(error.message)+'</div>'; return; }
+  window.__dossierId = teacherId;
+  renderDossier(data);
+}
+
+function renderDossier(d){
+  const el = document.getElementById('revContent');
+  const p = d.profile || {};
+  const fmt = s => s ? new Date(s).toLocaleDateString('ru-RU') : '—';
+  const stazh = p.start_date ? Math.floor((Date.now()-new Date(p.start_date))/(1000*60*60*24*30)) : null;
+
+  el.innerHTML = `
+    <button class="btn btn-ghost" style="margin-bottom:16px;padding:8px 16px;font-size:13px" onclick="reviewTab='teachers';renderReviewCabinet()">← К списку</button>
+    <div class="dos-head">
+      ${p.avatar_url ? `<img src="${esc(p.avatar_url)}" style="width:64px;height:64px;border-radius:50%;object-fit:cover">`
+        : `<div class="teach-ava" style="width:64px;height:64px;font-size:26px">${esc((p.name||'?').charAt(0))}</div>`}
+      <div>
+        <h2 style="font-size:22px;margin:0">${esc(p.name||'—')}</h2>
+        <div style="font-size:13px;color:var(--gray);margin-top:4px">
+          ${esc(p.email||'')}${p.telegram?` · ${esc(p.telegram)}`:''}${p.phone?` · ${esc(p.phone)}`:''}
+        </div>
+        <div style="font-size:12.5px;color:var(--gray);margin-top:4px">
+          В школе с ${fmt(p.start_date)}${stazh!=null?` (${stazh} мес.)`:''} · ${(p.roles||[]).join(', ')}
+        </div>
+      </div>
+    </div>
+
+    <h3 style="font-size:17px;margin:24px 0 10px">📚 Курсы и прогресс</h3>
+    ${(d.courses||[]).length ? d.courses.map(c => `
+      <div class="dos-course">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px">
+          <div style="font-weight:700">${c.emoji||'📘'} ${esc(c.title)}</div>
+          <div style="font-size:13px;color:var(--gray)">${c.done_lessons}/${c.total_lessons} уроков${c.completed_at?' · ✅ пройден':''}</div>
+        </div>
+        <div class="bar" style="height:8px;margin-top:8px"><i style="width:${c.total_lessons?c.done_lessons*100/c.total_lessons:0}%"></i></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+          ${c.deadline_at?`<span class="teach-chip">дедлайн ${fmt(c.deadline_at)}</span>`:''}
+          ${c.missed_count>0?`<span class="teach-chip bad">${c.missed_count} пропуск.</span>`:''}
+          ${c.suspended?`<span class="teach-chip bad">приостановлен</span>`:''}
+          ${c.certificate?`<span class="teach-chip ok">сертификат №${esc(c.certificate)}</span>`:''}
+        </div>
+      </div>`).join('') : '<div style="color:var(--gray);font-size:14px">Нет назначенных курсов.</div>'}
+
+    <h3 style="font-size:17px;margin:24px 0 10px">📊 История обучения</h3>
+    ${(d.history||[]).length ? `<div class="dos-hist">${d.history.map(h => `
+      <div class="dos-hist-row">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:14px">${esc(h.course)} · ${esc(h.lesson)}</div>
+          <div style="font-size:12px;color:var(--gray)">${h.section?esc(h.section)+' · ':''}${new Date(h.submitted_at).toLocaleDateString('ru-RU')}</div>
+        </div>
+        <div style="text-align:right;font-size:13px">
+          ${h.auto_score!=null?`<b>${h.auto_score}%</b>`:''}
+          ${h.review_status==='approved'?' <span style="color:#15803D">✓ принято</span>':h.review_status==='rejected'?' <span style="color:var(--red)">↩ доработка</span>':h.review_status==='pending'?' <span style="color:var(--orange)">⏳ на проверке</span>':''}
+        </div>
+      </div>`).join('')}</div>` : '<div style="color:var(--gray);font-size:14px">Пока нет сданных работ.</div>'}
+
+    <h3 style="font-size:17px;margin:24px 0 10px">📝 Заметки методиста <span style="font-size:12px;font-weight:400;color:var(--gray)">(видны только методистам)</span></h3>
+    <div id="dos-notes">${renderNotes(d.notes||[])}</div>
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <input id="dos-note-input" placeholder="Добавить заметку…" style="flex:1;padding:10px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:14px;background:#FDFCF8">
+      <button class="btn" style="padding:10px 20px" onclick="addNote()">Добавить</button>
+    </div>`;
+}
+
+function renderNotes(notes){
+  if (!notes.length) return '<div style="color:var(--gray);font-size:14px">Заметок пока нет.</div>';
+  return notes.map(n => `
+    <div class="dos-note">
+      <div style="font-size:14px">${esc(n.body)}</div>
+      <div style="font-size:11.5px;color:var(--gray);margin-top:4px">${esc(n.author||'методист')} · ${new Date(n.created_at).toLocaleString('ru-RU',{timeZone:'Europe/Moscow'})}
+        <button onclick="delNote('${n.id}')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:11.5px;margin-left:8px">удалить</button>
+      </div>
+    </div>`).join('');
+}
+
+async function addNote(){
+  const inp = document.getElementById('dos-note-input');
+  const body = inp.value.trim();
+  if (!body) return;
+  const { error } = await sb.rpc('learn_add_teacher_note', { p_teacher_id: window.__dossierId, p_body: body });
+  if (error) { alert(error.message); return; }
+  openDossier(window.__dossierId);
+}
+async function delNote(id){
+  if (!confirm('Удалить заметку?')) return;
+  await sb.rpc('learn_delete_teacher_note', { p_id: id });
+  openDossier(window.__dossierId);
 }
 
 // ===== Карта курса =====
