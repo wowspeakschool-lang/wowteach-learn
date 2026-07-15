@@ -130,6 +130,17 @@ button{font-family:inherit;cursor:pointer}
 .exam-divider{display:flex;align-items:center;gap:14px;margin:28px 0 16px}
 .exam-divider:before,.exam-divider:after{content:'';flex:1;height:2px;background:var(--cream-dark)}
 .exam-divider span{font-family:'Fredoka',sans-serif;font-weight:600;font-size:17px;color:var(--purple-dark);white-space:nowrap}
+.seq-table{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.seq-cell{display:flex;flex-direction:column;align-items:center;gap:4px}
+.seq-head{font-family:'Fredoka',sans-serif;font-weight:600;font-size:15px;color:var(--purple-dark);width:48px;text-align:center}
+.seq-box{width:48px;height:52px;text-align:center;font-size:22px;font-weight:800;border:2px solid var(--cream-dark);border-radius:10px;background:#FDFCF8;color:var(--dark)}
+.seq-box:focus{border-color:var(--purple);outline:none;box-shadow:0 0 0 3px var(--purple-light)}
+.kim-table{border-collapse:collapse;margin:12px 0;width:100%;max-width:520px;font-size:14.5px}
+.kim-table th,.kim-table td{border:1.5px solid var(--cream-dark);padding:8px 12px;text-align:left}
+.kim-table th{background:var(--purple-light);font-weight:800;color:var(--purple-dark)}
+.kim-table td:last-child,.kim-table th:last-child{text-align:center;width:90px;font-weight:700}
+.exam-timer{position:sticky;top:64px;z-index:30;float:right;background:var(--purple);color:#fff;font-family:'Fredoka',sans-serif;font-weight:600;font-size:19px;padding:8px 18px;border-radius:999px;box-shadow:var(--shadow);margin-bottom:8px}
+.exam-timer.danger{background:var(--red);animation:pulse 1s infinite}
 .q .bad{font-size:12px;font-weight:800;color:var(--red);background:var(--red-light);border-radius:999px;padding:2px 10px;margin-left:8px}
 .q .good{font-size:12px;font-weight:800;color:#15803D;background:var(--green-light);border-radius:999px;padding:2px 10px;margin-left:8px}
 .wr-tabs{display:flex;gap:8px;margin:14px 0 12px}
@@ -443,6 +454,10 @@ function renderLesson(slug, keepScroll){
   // любое редактирование в уроке помечает «есть несохранённое»
   body.addEventListener('input', markDirty);
   body.addEventListener('change', markDirty);
+  // запускаем таймер пробника, если он активен
+  const examBlock = (l.blocks||[]).find(bl => bl.type === 'exam' && bl.exam_timer);
+  if (examBlock) initExamTimer(examBlock.id, examBlock.exam_timer);
+  else if (examTimerInterval) { clearInterval(examTimerInterval); examTimerInterval = null; }
 }
 
 function renderBlock(b){
@@ -859,21 +874,107 @@ async function finishSpeaking(blockId, task, mime, stage){
 
 function fmtSec(s){ s = Math.max(0, s); return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`; }
 
+let examTimerInterval = null;
+
 function renderExam(b){
   const p = b.payload || {};
   const st = b.exam_state || {};
+  const timer = b.exam_timer || null;
   const secs = p.sections || [];
-  return `<div class="block">
+  const hasTimer = !!p.written_timer_sec;
+  const started = !!timer;
+
+  if (hasTimer && !started) {
+    return `<div class="block">
+      <div class="exam-head">
+        <h2 style="font-size:22px;margin-bottom:8px">📝 ${esc(p.title || 'Пробник')}</h2>
+        ${p.intro_html ? `<div class="block-text">${p.intro_html}</div>` : ''}
+        <div class="note warn" style="margin-top:14px">
+          ⏱ На письменную часть даётся <b>${Math.round(p.written_timer_sec/60)} минут</b>.
+          Таймер запустится по кнопке и будет идти непрерывно — даже если закроете страницу.
+          Когда время выйдет, ответы автоматически отправятся, а поля заблокируются.
+        </div>
+        <div style="text-align:center;margin-top:20px">
+          <button class="btn" style="font-size:17px;padding:16px 40px" onclick="startExam('${b.id}')">▶ Начать тест</button>
+        </div>
+        <div style="font-size:13px;color:var(--gray);text-align:center;margin-top:10px">
+          Устная часть — без общего таймера, у каждого задания свой.
+        </div>
+      </div>
+    </div>`;
+  }
+
+  const expired = timer && timer.expired;
+
+  return `<div class="block" id="exam-${b.id}" data-expired="${expired?1:0}">
+    ${hasTimer ? `<div class="exam-timer" id="exam-timer-${b.id}">⏱ <span id="tval-${b.id}">--:--</span></div>` : ''}
     <div class="exam-head">
       <h2 style="font-size:22px;margin-bottom:8px">📝 ${esc(p.title || 'Пробник')}</h2>
       ${p.intro_html ? `<div class="block-text">${p.intro_html}</div>` : ''}
-      ${p.written_timer_sec ? `<div class="note info" style="margin-top:14px">⏱ Письменная часть: ${Math.round(p.written_timer_sec/60)} минут. Таймер появится на следующем шаге разработки.</div>` : ''}
+      ${expired ? '<div class="note err" style="margin-top:14px"><b>⏱ Время письменной части истекло.</b> Ответы сохранены. Устную часть можно выполнить ниже.</div>' : ''}
     </div>
     ${secs.map((sec, si) => {
       const div = sec.divider ? `<div class="exam-divider"><span>${esc(sec.divider)}</span></div>` : '';
       return div + renderSection(b.id, sec, si, st);
     }).join('')}
   </div>`;
+}
+
+function initExamTimer(blockId, timer){
+  if (examTimerInterval) { clearInterval(examTimerInterval); examTimerInterval = null; }
+  if (!timer) return;
+  const deadline = new Date(timer.deadline_at).getTime();
+  const serverOffset = Date.now() - new Date(timer.server_now).getTime();
+  const tick = () => {
+    const left = Math.max(0, Math.round((deadline - (Date.now() - serverOffset)) / 1000));
+    const el = document.getElementById('tval-' + blockId);
+    const box = document.getElementById('exam-timer-' + blockId);
+    if (el) el.textContent = fmtClock(left);
+    if (box) box.classList.toggle('danger', left <= 300);
+    if (left <= 0) {
+      clearInterval(examTimerInterval); examTimerInterval = null;
+      onExamExpire(blockId);
+    }
+  };
+  tick();
+  examTimerInterval = setInterval(tick, 1000);
+}
+
+function fmtClock(s){
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  return (h>0 ? h+':' : '') + String(m).padStart(h>0?2:1,'0') + ':' + String(sec).padStart(2,'0');
+}
+
+async function startExam(blockId){
+  const { error } = await sb.rpc('learn_exam_start', { p_block_id: blockId });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  refreshLesson();
+}
+
+async function onExamExpire(blockId){
+  await autoSubmitWritten(blockId);
+  const box = document.getElementById('exam-' + blockId);
+  if (box) {
+    box.querySelectorAll('input, textarea, [contenteditable]').forEach(el => {
+      if (el.closest('.sp-task')) return;
+      el.setAttribute('disabled', 'true');
+      if (el.hasAttribute('contenteditable')) el.setAttribute('contenteditable', 'false');
+    });
+  }
+  refreshLesson();
+}
+
+async function autoSubmitWritten(blockId){
+  const box = document.getElementById('exam-' + blockId);
+  if (!box) return;
+  for (const q of box.querySelectorAll('[id^="exq-' + blockId + '-"]')) {
+    const si = q.id.split('-').pop();
+    try { await submitExamQuiz(blockId, si); } catch(_){}
+  }
+  for (const e of box.querySelectorAll('[id^="exe-' + blockId + '-"]')) {
+    const si = e.id.split('-').pop();
+    try { await submitExamExact(blockId, si); } catch(_){}
+  }
 }
 
 // ключ секции в exam_state: тип + индекс (несколько секций одного типа не конфликтуют)
@@ -925,13 +1026,29 @@ function renderSection(blockId, sec, si, st){
         ${(sec.items||[]).map((it, ii) => {
           const mark = res ? res[ii] : undefined;
           const badge = mark===false?'<span class="bad">неверно</span>':mark===true?'<span class="good">верно</span>':'';
+          const saved = ans[ii]!=null ? (Array.isArray(ans[ii])?ans[ii][0]:ans[ii]) : '';
+          let field;
+          if (it.kind === 'sequence') {
+            // таблица клеток: буквы сверху, ввод под каждой
+            const letters = (it.letters || 'ABCDEFG').slice(0, it.cells || (it.letters ? it.letters.length : String(saved).length || 6));
+            field = `<div class="seq-table" data-ii="${ii}">
+              ${[...letters].map((L, ci) => `
+                <div class="seq-cell">
+                  <div class="seq-head">${L}</div>
+                  <input type="text" inputmode="numeric" maxlength="1" class="seq-box" data-ci="${ci}"
+                    value="${esc(String(saved)[ci] || '')}"
+                    oninput="seqAdvance(this)">
+                </div>`).join('')}
+            </div>`;
+          } else {
+            field = `<input type="text" class="exe-field" data-ii="${ii}" spellcheck="false" autocapitalize="off"
+              value="${esc(saved)}" placeholder="ваш ответ"
+              style="width:100%;padding:11px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:15px;background:#FDFCF8;margin-top:6px;font-weight:700">`;
+          }
           return `<div class="q" style="${mark===false?'border-left:3px solid var(--red);padding-left:12px':''}">
             ${it.prompt_html ? `<div class="block-text" style="margin-bottom:8px">${it.prompt_html}</div>` : ''}
             <div class="qt">${it.n!=null?it.n+'. ':''}${esc(it.prompt||'')}${badge}</div>
-            <input type="text" class="exe-field" data-ii="${ii}" spellcheck="false" autocapitalize="off"
-              value="${esc(ans[ii]!=null?(Array.isArray(ans[ii])?ans[ii][0]:ans[ii]):'')}"
-              placeholder="${it.kind==='sequence'?'например: 632174':'ваш ответ'}"
-              style="width:100%;padding:11px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:15px;background:#FDFCF8;margin-top:6px;font-weight:700">
+            ${field}
           </div>`;
         }).join('')}
       </div>
@@ -1052,11 +1169,27 @@ async function submitExamQuiz(blockId, si){
 async function submitExamExact(blockId, si){
   const box = document.getElementById('exe-' + blockId + '-' + si);
   const answers = {};
+  // обычные поля (word)
   box.querySelectorAll('.exe-field').forEach(f => answers[f.dataset.ii] = f.value.trim());
+  // таблицы-клетки (sequence) — собираем строку из клеток
+  box.querySelectorAll('.seq-table').forEach(t => {
+    const seq = [...t.querySelectorAll('.seq-box')].map(b => b.value.trim()).join('');
+    answers[t.dataset.ii] = seq;
+  });
   const { error } = await sb.rpc('learn_submit_exam',
     { p_block_id: blockId, p_section: 'exact_' + si, p_kind: 'exact', p_answers: answers, p_meta: { si } });
   if (error) { alert(error.message); return; }
   refreshLesson();
+}
+
+// автопереход к следующей клетке при вводе цифры
+function seqAdvance(input){
+  input.value = input.value.replace(/[^0-9]/g, '').slice(0, 1);
+  if (input.value) {
+    const cells = [...input.closest('.seq-table').querySelectorAll('.seq-box')];
+    const idx = cells.indexOf(input);
+    if (idx >= 0 && idx < cells.length - 1) cells[idx + 1].focus();
+  }
 }
 function wrTab(blockId, key, mode, btn){
   btn.parentElement.querySelectorAll('.wr-tab').forEach(t => t.classList.remove('on'));
