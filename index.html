@@ -458,6 +458,32 @@ function renderLesson(slug, keepScroll){
   const examBlock = (l.blocks||[]).find(bl => bl.type === 'exam' && bl.exam_timer);
   if (examBlock) initExamTimer(examBlock.id, examBlock.exam_timer);
   else if (examTimerInterval) { clearInterval(examTimerInterval); examTimerInterval = null; }
+  // подгружаем плееры записей устной части
+  loadSpeakingPlayers(l);
+}
+
+async function loadSpeakingPlayers(l){
+  const exam = (l.blocks||[]).find(bl => bl.type === 'exam');
+  if (!exam || !exam.exam_state) return;
+  for (const [key, sub] of Object.entries(exam.exam_state)) {
+    if (!key.startsWith('speaking_')) continue;
+    const tid = key.replace('speaking_', '');
+    const holder = document.getElementById(`sp-player-${exam.id}-${tid}`);
+    if (!holder) continue;
+    const paths = sub.meta?.parts?.length ? sub.meta.parts : (sub.storage_path ? [sub.storage_path] : []);
+    if (!paths.length) { holder.innerHTML = ''; continue; }
+    try {
+      const urls = [];
+      for (const p of paths) {
+        const { data, error } = await sb.storage.from('learn-tasks').createSignedUrl(p, 3600);
+        if (!error && data) urls.push(data.signedUrl);
+      }
+      holder.innerHTML = `<div style="font-size:12.5px;color:var(--gray);margin-bottom:6px">🎧 Ваша запись (можно переслушать):</div>`
+        + urls.map(u => `<audio controls src="${u}" style="width:100%;margin-bottom:6px"></audio>`).join('');
+    } catch(e) {
+      holder.innerHTML = '<div style="font-size:12.5px;color:var(--gray)">Запись сохранена.</div>';
+    }
+  }
 }
 
 function renderBlock(b){
@@ -1006,54 +1032,51 @@ function renderSection(blockId, sec, si, st){
   if (kind === 'auto_quiz') {
     const sk = 'quiz_' + si;
     const s = st[sk];
-    const res = s?.results || null;
+    const saved = s?.answers != null;
     return sectionWrap('📋', sec.title, sec.note, `
       ${sec.intro_html ? `<div class="block-text" style="margin-bottom:16px">${sec.intro_html}</div>` : ''}
       <div id="exq-${blockId}-${si}">
-        ${(sec.quiz?.questions||[]).map((q, qi) => renderExamQuestion(blockId + '-' + si, q, qi, res, s)).join('')}
+        ${(sec.quiz?.questions||[]).map((q, qi) => renderExamQuestion(blockId + '-' + si, q, qi, null, s)).join('')}
       </div>
-      ${s?.auto_score != null ? `<div class="note ${s.auto_score>=80?'ok':'warn'}">Результат: <b>${s.auto_score}%</b></div>` : ''}
-      <button class="btn" style="margin-top:14px" onclick="submitExamQuiz('${blockId}', ${si})">${s?'Проверить ещё раз':'Проверить'}</button>`);
+      ${saved ? '<div class="note ok" style="margin-top:12px">✓ Ответ сохранён. Результат появится после проверки.</div>' : ''}
+      <button class="btn" style="margin-top:14px" onclick="submitExamQuiz('${blockId}', ${si})">${saved?'Изменить ответ':'Сохранить ответ'}</button>`);
   }
   if (kind === 'exact_input') {
     const sk = 'exact_' + si;
     const s = st[sk];
-    const res = s?.results || null;
+    const saved = s?.answers != null;
     const ans = s?.answers || {};
     return sectionWrap('⌨️', sec.title, sec.note, `
       ${sec.intro_html ? `<div class="block-text" style="margin-bottom:16px">${sec.intro_html}</div>` : ''}
       <div id="exe-${blockId}-${si}">
         ${(sec.items||[]).map((it, ii) => {
-          const mark = res ? res[ii] : undefined;
-          const badge = mark===false?'<span class="bad">неверно</span>':mark===true?'<span class="good">верно</span>':'';
-          const saved = ans[ii]!=null ? (Array.isArray(ans[ii])?ans[ii][0]:ans[ii]) : '';
+          const savedVal = ans[ii]!=null ? (Array.isArray(ans[ii])?ans[ii][0]:ans[ii]) : '';
           let field;
           if (it.kind === 'sequence') {
-            // таблица клеток: буквы сверху, ввод под каждой
-            const letters = (it.letters || 'ABCDEFG').slice(0, it.cells || (it.letters ? it.letters.length : String(saved).length || 6));
+            const letters = (it.letters || 'ABCDEFG').slice(0, it.cells || (it.letters ? it.letters.length : String(savedVal).length || 6));
             field = `<div class="seq-table" data-ii="${ii}">
               ${[...letters].map((L, ci) => `
                 <div class="seq-cell">
                   <div class="seq-head">${L}</div>
                   <input type="text" inputmode="numeric" maxlength="1" class="seq-box" data-ci="${ci}"
-                    value="${esc(String(saved)[ci] || '')}"
+                    value="${esc(String(savedVal)[ci] || '')}"
                     oninput="seqAdvance(this)">
                 </div>`).join('')}
             </div>`;
           } else {
             field = `<input type="text" class="exe-field" data-ii="${ii}" spellcheck="false" autocapitalize="off"
-              value="${esc(saved)}" placeholder="ваш ответ"
+              value="${esc(savedVal)}" placeholder="ваш ответ"
               style="width:100%;padding:11px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:15px;background:#FDFCF8;margin-top:6px;font-weight:700">`;
           }
-          return `<div class="q" style="${mark===false?'border-left:3px solid var(--red);padding-left:12px':''}">
+          return `<div class="q">
             ${it.prompt_html ? `<div class="block-text" style="margin-bottom:8px">${it.prompt_html}</div>` : ''}
-            <div class="qt">${it.n!=null?it.n+'. ':''}${esc(it.prompt||'')}${badge}</div>
+            <div class="qt">${it.n!=null?it.n+'. ':''}${esc(it.prompt||'')}</div>
             ${field}
           </div>`;
         }).join('')}
       </div>
-      ${s?.auto_score!=null?`<div class="note ${s.auto_score>=80?'ok':'warn'}">Результат: <b>${s.auto_score}%</b></div>`:''}
-      <button class="btn" style="margin-top:14px" onclick="submitExamExact('${blockId}', ${si})">${s?'Проверить ещё раз':'Проверить'}</button>`);
+      ${saved ? '<div class="note ok" style="margin-top:12px">✓ Ответ сохранён. Результат появится после проверки.</div>' : ''}
+      <button class="btn" style="margin-top:14px" onclick="submitExamExact('${blockId}', ${si})">${saved?'Изменить ответ':'Сохранить ответ'}</button>`);
   }
   if (kind === 'writing') {
     const key = 'writing_' + si;
@@ -1115,6 +1138,7 @@ function renderSection(blockId, sec, si, st){
             </div>
             ${t.prompt_html ? `<div class="block-text" style="margin-top:10px;font-size:14px">${t.prompt_html}</div>` : ''}
             ${imgs}
+            ${(s?.meta?.parts?.length || s?.storage_path) ? `<div id="sp-player-${blockId}-${t.id}" style="margin-top:12px"><div style="font-size:12.5px;color:var(--gray)">🎧 Загружаю вашу запись…</div></div>` : ''}
             ${done==='rejected'?`<div class="note err" style="margin-top:10px">✏️ ${s.note?esc(s.note):'на доработку'}</div>`:''}
             <div class="sp-stage" id="sp-stage-${blockId}-${t.id}" style="display:none"></div>
           </div>`;
