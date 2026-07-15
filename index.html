@@ -876,6 +876,16 @@ function renderExam(b){
   </div>`;
 }
 
+// ключ секции в exam_state: тип + индекс (несколько секций одного типа не конфликтуют)
+function secKey(sec, si){
+  if (sec.kind === 'auto_quiz') return 'quiz_' + si;
+  if (sec.kind === 'exact_input') return 'exact_' + si;
+  if (sec.kind === 'writing') return 'writing_' + si;
+  if (sec.kind === 'reflection') return 'reflection';
+  if (sec.kind === 'audio') return 'audio';
+  return sec.kind + '_' + si;
+}
+
 function renderSection(blockId, sec, si, st){
   const kind = sec.kind;
   if (kind === 'audio') {
@@ -893,25 +903,30 @@ function renderSection(blockId, sec, si, st){
       </div>`);
   }
   if (kind === 'auto_quiz') {
-    const s = st['auto_quiz'];
+    const sk = 'quiz_' + si;
+    const s = st[sk];
     const res = s?.results || null;
     return sectionWrap('📋', sec.title, sec.note, `
-      <div id="exq-${blockId}">
-        ${(sec.quiz?.questions||[]).map((q, qi) => renderExamQuestion(blockId, q, qi, res, s)).join('')}
+      ${sec.intro_html ? `<div class="block-text" style="margin-bottom:16px">${sec.intro_html}</div>` : ''}
+      <div id="exq-${blockId}-${si}">
+        ${(sec.quiz?.questions||[]).map((q, qi) => renderExamQuestion(blockId + '-' + si, q, qi, res, s)).join('')}
       </div>
       ${s?.auto_score != null ? `<div class="note ${s.auto_score>=80?'ok':'warn'}">Результат: <b>${s.auto_score}%</b></div>` : ''}
-      <button class="btn" style="margin-top:14px" onclick="submitExamQuiz('${blockId}')">${s?'Проверить ещё раз':'Проверить'}</button>`);
+      <button class="btn" style="margin-top:14px" onclick="submitExamQuiz('${blockId}', ${si})">${s?'Проверить ещё раз':'Проверить'}</button>`);
   }
   if (kind === 'exact_input') {
-    const s = st['exact_input'];
+    const sk = 'exact_' + si;
+    const s = st[sk];
     const res = s?.results || null;
     const ans = s?.answers || {};
     return sectionWrap('⌨️', sec.title, sec.note, `
-      <div id="exe-${blockId}">
+      ${sec.intro_html ? `<div class="block-text" style="margin-bottom:16px">${sec.intro_html}</div>` : ''}
+      <div id="exe-${blockId}-${si}">
         ${(sec.items||[]).map((it, ii) => {
           const mark = res ? res[ii] : undefined;
           const badge = mark===false?'<span class="bad">неверно</span>':mark===true?'<span class="good">верно</span>':'';
           return `<div class="q" style="${mark===false?'border-left:3px solid var(--red);padding-left:12px':''}">
+            ${it.prompt_html ? `<div class="block-text" style="margin-bottom:8px">${it.prompt_html}</div>` : ''}
             <div class="qt">${it.n!=null?it.n+'. ':''}${esc(it.prompt||'')}${badge}</div>
             <input type="text" class="exe-field" data-ii="${ii}" spellcheck="false" autocapitalize="off"
               value="${esc(ans[ii]!=null?(Array.isArray(ans[ii])?ans[ii][0]:ans[ii]):'')}"
@@ -921,7 +936,7 @@ function renderSection(blockId, sec, si, st){
         }).join('')}
       </div>
       ${s?.auto_score!=null?`<div class="note ${s.auto_score>=80?'ok':'warn'}">Результат: <b>${s.auto_score}%</b></div>`:''}
-      <button class="btn" style="margin-top:14px" onclick="submitExamExact('${blockId}')">${s?'Проверить ещё раз':'Проверить'}</button>`);
+      <button class="btn" style="margin-top:14px" onclick="submitExamExact('${blockId}', ${si})">${s?'Проверить ещё раз':'Проверить'}</button>`);
   }
   if (kind === 'writing') {
     const key = 'writing_' + si;
@@ -959,8 +974,12 @@ function renderSection(blockId, sec, si, st){
           const key = 'speaking_' + t.id;
           const s = st2[key];
           const done = s?.review_status || (s?.has_file ? 'pending' : null);
-          const imgs = (t.images || (t.image ? [t.image] : [])).map(pth =>
-            `<img src="${esc(mediaUrl(pth))}" style="max-width:100%;border-radius:10px;margin:8px 0;border:1px solid var(--cream-dark)">`).join('');
+          const imgList = (t.images || (t.image ? [t.image] : []));
+          const imgs = imgList.length
+            ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin:8px 0">${
+                imgList.map(pth => `<img src="${esc(mediaUrl(pth))}" style="flex:1;min-width:220px;max-width:100%;border-radius:10px;border:1px solid var(--cream-dark)">`).join('')
+              }</div>`
+            : '';
           const modeHint = t.audio_path ? '🎧 Аудио + запись одновременно'
             : t.perItemSec ? `${t.items} ответов по ${t.perItemSec}с`
             : `запись до ${t.maxDurationSec}с`;
@@ -1023,19 +1042,19 @@ function collectExam(prefix, blockId, selector){
   });
   return answers;
 }
-async function submitExamQuiz(blockId){
-  const answers = collectExam('exq-', blockId);
+async function submitExamQuiz(blockId, si){
+  const answers = collectExam('exq-', blockId + '-' + si);
   const { error } = await sb.rpc('learn_submit_exam',
-    { p_block_id: blockId, p_section: 'auto_quiz', p_kind: 'quiz', p_answers: answers });
+    { p_block_id: blockId, p_section: 'quiz_' + si, p_kind: 'quiz', p_answers: answers, p_meta: { si } });
   if (error) { alert(error.message); return; }
   refreshLesson();
 }
-async function submitExamExact(blockId){
-  const box = document.getElementById('exe-' + blockId);
+async function submitExamExact(blockId, si){
+  const box = document.getElementById('exe-' + blockId + '-' + si);
   const answers = {};
   box.querySelectorAll('.exe-field').forEach(f => answers[f.dataset.ii] = f.value.trim());
   const { error } = await sb.rpc('learn_submit_exam',
-    { p_block_id: blockId, p_section: 'exact_input', p_kind: 'exact', p_answers: answers });
+    { p_block_id: blockId, p_section: 'exact_' + si, p_kind: 'exact', p_answers: answers, p_meta: { si } });
   if (error) { alert(error.message); return; }
   refreshLesson();
 }
