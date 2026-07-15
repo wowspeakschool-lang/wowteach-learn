@@ -473,16 +473,20 @@ async function loadSpeakingPlayers(l){
     if (!holder) continue;
     const paths = sub.meta?.parts?.length ? sub.meta.parts : (sub.storage_path ? [sub.storage_path] : []);
     if (!paths.length) { holder.innerHTML = ''; continue; }
-    try {
-      const urls = [];
-      for (const p of paths) {
+    const urls = [];
+    let firstErr = null;
+    for (const p of paths) {
+      try {
         const { data, error } = await sb.storage.from('learn-tasks').createSignedUrl(p, 3600);
-        if (!error && data) urls.push(data.signedUrl);
-      }
+        if (error) { firstErr = error.message || String(error); continue; }
+        if (data?.signedUrl) urls.push(data.signedUrl);
+      } catch(e) { firstErr = e.message || String(e); }
+    }
+    if (urls.length) {
       holder.innerHTML = `<div style="font-size:12.5px;color:var(--gray);margin-bottom:6px">🎧 Ваша запись (можно переслушать):</div>`
-        + urls.map(u => `<audio controls src="${u}" style="width:100%;margin-bottom:6px"></audio>`).join('');
-    } catch(e) {
-      holder.innerHTML = '<div style="font-size:12.5px;color:var(--gray)">Запись сохранена.</div>';
+        + urls.map(u => `<audio controls preload="metadata" src="${u}" style="width:100%;margin-bottom:6px"></audio>`).join('');
+    } else {
+      holder.innerHTML = `<div class="note warn" style="font-size:12.5px">Запись сохранена, но не удалось загрузить плеер${firstErr ? ': ' + esc(firstErr) : ''}.</div>`;
     }
   }
 }
