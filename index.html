@@ -232,6 +232,12 @@ button{font-family:inherit;cursor:pointer}
 .fw-toggle{background:var(--cream);border:1.5px solid var(--cream-dark);border-radius:8px;padding:6px 12px;font-size:12.5px;font-weight:700;color:var(--purple-dark);cursor:pointer}
 .fw-toggle:hover{background:var(--cream-dark)}
 .fw-tasktext{background:#F8F6FF;border-radius:10px;padding:14px 16px;margin-top:8px;font-size:13.5px;line-height:1.6}
+.fw-finish{background:#fff;border:2px solid var(--purple);border-radius:14px;padding:20px 24px;margin-top:20px;text-align:center}
+.exam-result-banner{background:linear-gradient(135deg,#EAF7EE,#F0ECFF);border:2px solid #22C55E;border-radius:14px;padding:18px 22px;margin-bottom:18px}
+.notif-panel{position:fixed;top:60px;right:24px;width:340px;max-width:90vw;max-height:70vh;overflow-y:auto;background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.15);z-index:100;padding:8px}
+.notif-item{padding:12px 14px;border-radius:10px;margin-bottom:4px}
+.notif-item.unread{background:#FBFAFF;border-left:3px solid var(--purple)}
+.notif-item:hover{background:var(--cream)}
 .rec-box{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px;margin-top:14px;border:2px solid var(--purple);border-radius:var(--radius);background:var(--purple-light);text-align:center}
 .rec-box.prep{border-color:var(--orange);background:var(--orange-light)}
 .rec-time{font-family:'Fredoka',sans-serif;font-size:40px;font-weight:600;color:var(--purple-dark);line-height:1}
@@ -360,8 +366,9 @@ async function init(){
   const { data: isEditor } = await sb.rpc('learn_is_editor');
   window.__isEditor = !!isEditor;
   document.getElementById('me').innerHTML =
-    `${esc(session.user.email)} · <button onclick="logout()">Выйти</button>`;
+    `<span id="teachNotifBell"></span>${esc(session.user.email)} · <button onclick="logout()">Выйти</button>`;
   renderMainNav();
+  if (!window.__isEditor) loadTeacherNotifications();
   route();
 
   function renderMainNav(){
@@ -1119,6 +1126,7 @@ function renderFullWork(){
           const g = grades[sk] || {};
           return `<div class="fw-task">
             <div style="font-weight:700;font-size:14px">${esc(t.label||t.id)} <span class="fw-max">макс ${t.max_score||'—'}</span></div>
+            ${t.prompt_html ? `<div style="margin:6px 0"><button class="fw-toggle" onclick="const b=this.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';this.textContent=b.style.display==='none'?'📄 Показать задание':'📄 Скрыть задание'">📄 Показать задание</button><div style="display:none" class="fw-tasktext">${t.prompt_html}</div></div>` : ''}
             ${(s.meta?.parts?.length||s.storage_path)?`<div id="fw-audio-${sk}" style="margin-top:8px;font-size:13px;color:var(--gray)">🎧 загружаю запись…</div>`:'<div style="color:var(--gray);font-size:13px;margin-top:6px">Нет записи</div>'}
             ${gradeInput(enrollmentId, blockId, sk, t.max_score, g)}
           </div>`;
@@ -1149,6 +1157,10 @@ function renderFullWork(){
       </div>
     </div>
     ${sectionsHtml}
+    <div class="fw-finish">
+      <div style="font-size:13.5px;color:var(--gray);margin-bottom:10px">Когда выставлены все баллы, завершите проверку — преподаватель получит уведомление и увидит результат.</div>
+      <button class="btn" style="font-size:16px;padding:14px 32px" onclick="finishReview('${enrollmentId}','${blockId}')">✅ Завершить проверку и отправить результат</button>
+    </div>
     <div style="height:40px"></div>`;
 
   Object.entries(subs).forEach(([sk, s]) => {
@@ -1189,6 +1201,43 @@ async function saveGrade(enr, blk, sk, max){
   if (tEl && total) tEl.innerHTML = `<div class="fw-total-num">${total.total} / ${total.max}</div><div style="font-size:11.5px;color:var(--gray)">авто ${total.auto} + ручной ${total.manual}</div>`;
   btn.textContent = '✓ Сохранено'; btn.style.background = 'var(--gray)';
   setTimeout(()=>{ btn.textContent='Сохранить балл'; btn.style.background=''; }, 1500);
+}
+
+async function finishReview(enr, blk){
+  if (!confirm('Завершить проверку? Преподавателю уйдёт уведомление и письмо с результатом, работа откроется для просмотра.')) return;
+  const { error } = await sb.rpc('learn_finish_review', { p_enrollment_id: enr, p_block_id: blk });
+  if (error) { alert(error.message); return; }
+  alert('Проверка завершена. Преподаватель уведомлён.');
+  openReviewCabinet('queue');
+}
+
+// ===== Уведомления учителя =====
+async function loadTeacherNotifications(){
+  const { data } = await sb.rpc('learn_my_notifications');
+  const notifs = data || [];
+  const unread = notifs.filter(n => !n.is_read).length;
+  const bell = document.getElementById('teachNotifBell');
+  if (!bell) return;
+  bell.innerHTML = `<a href="#" onclick="toggleTeacherNotifs(event)" style="position:relative;margin-right:14px;text-decoration:none;font-size:18px">🔔${unread?`<span style="position:absolute;top:-6px;right:-8px;background:var(--red);color:#fff;font-size:10px;font-weight:800;border-radius:999px;padding:1px 5px">${unread}</span>`:''}</a>`;
+  window.__teacherNotifs = notifs;
+}
+
+function toggleTeacherNotifs(e){
+  e.preventDefault();
+  let panel = document.getElementById('teachNotifPanel');
+  if (panel) { panel.remove(); return; }
+  const notifs = window.__teacherNotifs || [];
+  panel = document.createElement('div');
+  panel.id = 'teachNotifPanel';
+  panel.className = 'notif-panel';
+  panel.innerHTML = notifs.length ? notifs.map(n => `
+    <div class="notif-item ${n.is_read?'':'unread'}" ${n.course_slug?`onclick="document.getElementById('teachNotifPanel').remove();go('course/${n.course_slug}')" style="cursor:pointer"`:''}>
+      <div style="font-weight:800;font-size:13.5px">${esc(n.title)}</div>
+      <div style="font-size:12.5px;color:var(--gray);margin-top:3px">${esc(n.body||'')}</div>
+      <div style="font-size:11px;color:var(--gray);margin-top:4px">${new Date(n.created_at).toLocaleString('ru-RU',{timeZone:'Europe/Moscow'})}</div>
+    </div>`).join('') : '<div style="padding:16px;color:var(--gray);font-size:13px">Уведомлений нет.</div>';
+  document.body.appendChild(panel);
+  sb.rpc('learn_mark_my_notifications_read').then(() => loadTeacherNotifications());
 }
 
 async function loadFullWorkMedia(sk, s){
@@ -1463,6 +1512,26 @@ function renderLesson(slug, keepScroll){
   else if (examTimerInterval) { clearInterval(examTimerInterval); examTimerInterval = null; }
   // подгружаем плееры записей устной части
   loadSpeakingPlayers(l);
+  loadExamResults(l);
+}
+
+async function loadExamResults(l){
+  if (window.__isEditor) return;   // результат — для учителя
+  const examBlock = (l.blocks||[]).find(bl => bl.type === 'exam');
+  if (!examBlock) return;
+  const holder = document.getElementById('exam-result-' + examBlock.id);
+  if (!holder) return;
+  const { data } = await sb.rpc('learn_exam_result', { p_block_id: examBlock.id });
+  if (!data || !data.reviewed) return;
+  let line;
+  if (data.secondary != null) line = `Первичный балл: <b>${data.primary}</b> из ${data.max} · Тестовый балл: <b>${data.secondary}</b> из 100`;
+  else if (data.grade != null) line = `Первичный балл: <b>${data.primary}</b> из ${data.max} · Оценка: <b>${data.grade}</b>`;
+  else line = `Балл: <b>${data.primary}</b> из ${data.max}`;
+  holder.innerHTML = `<div class="exam-result-banner">
+    <div style="font-size:13px;font-weight:800;color:#15803D;text-transform:uppercase;letter-spacing:.5px">✅ Работа проверена методистом</div>
+    <div style="font-size:19px;margin-top:6px">${line}</div>
+    <div style="font-size:12.5px;color:var(--gray);margin-top:6px">Комментарии методиста — под соответствующими заданиями ниже.</div>
+  </div>`;
 }
 
 async function loadSpeakingPlayers(l){
@@ -1947,6 +2016,7 @@ function renderExam(b){
 
   return `<div class="block" id="exam-${b.id}" data-expired="${expired?1:0}">
     ${hasTimer ? `<div class="exam-timer" id="exam-timer-${b.id}">⏱ <span id="tval-${b.id}">--:--</span></div>` : ''}
+    <div id="exam-result-${b.id}"></div>
     <div class="exam-head">
       <h2 style="font-size:22px;margin-bottom:8px">📝 ${esc(p.title || 'Пробник')}</h2>
       ${p.intro_html ? `<div class="block-text">${p.intro_html}</div>` : ''}
