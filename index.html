@@ -170,6 +170,11 @@ button{font-family:inherit;cursor:pointer}
 .teach-card{background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;padding:16px 18px;cursor:pointer;transition:border-color .15s}
 .teach-card:hover{border-color:var(--purple)}
 .teach-ava{width:44px;height:44px;border-radius:50%;background:var(--purple-light);color:var(--purple-dark);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;flex-shrink:0}
+.teach-photo{width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0}
+.teach-toolbar{margin-bottom:18px}
+.teach-filters{display:flex;gap:8px;flex-wrap:wrap}
+.teach-filter{border:1.5px solid var(--cream-dark);background:#fff;border-radius:999px;padding:7px 14px;font-size:13px;font-weight:700;color:var(--gray);cursor:pointer}
+.teach-filter.on{border-color:var(--purple);background:var(--purple-light);color:var(--purple-dark)}
 .teach-chip{font-size:11.5px;font-weight:700;background:var(--cream);border-radius:999px;padding:3px 10px;color:var(--gray)}
 .teach-chip.ok{background:var(--green-light);color:#15803D}
 .teach-chip.warn{background:#FFF0E4;color:#C2410C}
@@ -621,14 +626,49 @@ async function loadTeachers(){
   if (reviewTab === 'teachers') renderReviewContent();
 }
 
+let teachFilter = 'all';
+let teachSearch = '';
+
 function renderTeachers(el){
   const ts = window.__teachers;
   if (!ts) { el.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray)">Загружаю…</div>'; return; }
-  if (!ts.length) { el.innerHTML = '<div class="note">Преподавателей не найдено.</div>'; return; }
-  el.innerHTML = `<div class="teach-grid">${ts.map(t => `
-    <div class="teach-card" onclick="openDossier('${t.id}')">
+
+  // применяем поиск и фильтр
+  const q = teachSearch.trim().toLowerCase();
+  let list = ts.filter(t => !q || (t.name||'').toLowerCase().includes(q) || (t.email||'').toLowerCase().includes(q));
+  if (teachFilter === 'pending') list = list.filter(t => t.pending_reviews > 0);
+  else if (teachFilter === 'missed') list = list.filter(t => t.missed > 0);
+  else if (teachFilter === 'suspended') list = list.filter(t => t.suspended);
+  else if (teachFilter === 'done') list = list.filter(t => t.courses_total > 0 && t.courses_done === t.courses_total);
+  else if (teachFilter === 'active') list = list.filter(t => t.courses_total > 0 && t.courses_done < t.courses_total);
+
+  const counts = {
+    all: ts.length,
+    active: ts.filter(t => t.courses_total > 0 && t.courses_done < t.courses_total).length,
+    pending: ts.filter(t => t.pending_reviews > 0).length,
+    missed: ts.filter(t => t.missed > 0).length,
+    suspended: ts.filter(t => t.suspended).length,
+    done: ts.filter(t => t.courses_total > 0 && t.courses_done === t.courses_total).length,
+  };
+
+  el.innerHTML = `
+    <div class="teach-toolbar">
+      <input id="teach-search" placeholder="🔍 Поиск по имени или email…" value="${esc(teachSearch)}"
+        oninput="teachSearch=this.value;renderReviewContent();document.getElementById('teach-search').focus()"
+        style="width:100%;padding:11px 16px;border:2px solid var(--cream-dark);border-radius:12px;font-size:14.5px;background:#fff;margin-bottom:12px">
+      <div class="teach-filters">
+        ${[['all','Все'],['active','В процессе'],['pending','На проверке'],['missed','С пропусками'],['suspended','Приостановлены'],['done','Завершили']]
+          .map(([k,label]) => `<button class="teach-filter ${teachFilter===k?'on':''}" onclick="teachFilter='${k}';renderReviewContent()">${label} ${counts[k]}</button>`).join('')}
+      </div>
+    </div>
+    ${list.length ? `<div class="teach-grid">${list.map(t => teachCard(t)).join('')}</div>`
+      : '<div class="note" style="margin-top:16px">Никого не найдено по этому фильтру.</div>'}`;
+}
+
+function teachCard(t){
+  return `<div class="teach-card" onclick="openDossier('${t.id}')">
       <div style="display:flex;align-items:center;gap:12px">
-        ${t.avatar_url ? `<img src="${esc(t.avatar_url)}" style="width:44px;height:44px;border-radius:50%;object-fit:cover">`
+        ${t.avatar_url ? `<img src="${esc(t.avatar_url)}" class="teach-photo" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'teach-ava',textContent:'${esc((t.name||'?').charAt(0))}'}))">`
           : `<div class="teach-ava">${esc((t.name||'?').charAt(0))}</div>`}
         <div style="flex:1;min-width:0">
           <div style="font-weight:800;font-size:15px">${esc(t.name||'—')}</div>
@@ -641,7 +681,7 @@ function renderTeachers(el){
         ${t.missed>0?`<span class="teach-chip bad">${t.missed} пропуск.</span>`:''}
         ${t.suspended?`<span class="teach-chip bad">приостановлен</span>`:''}
       </div>
-    </div>`).join('')}</div>`;
+    </div>`;
 }
 
 async function openDossier(teacherId){
