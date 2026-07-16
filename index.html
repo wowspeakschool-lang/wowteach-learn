@@ -229,6 +229,9 @@ button{font-family:inherit;cursor:pointer}
 .fw-qmark.bad{background:var(--red-light);color:var(--red)}
 .fw-task{border-top:1px solid var(--cream);padding-top:12px;margin-top:12px}
 .fw-grade{background:#FBFAFF;border-radius:10px;padding:12px 14px;margin-top:12px}
+.fw-toggle{background:var(--cream);border:1.5px solid var(--cream-dark);border-radius:8px;padding:6px 12px;font-size:12.5px;font-weight:700;color:var(--purple-dark);cursor:pointer}
+.fw-toggle:hover{background:var(--cream-dark)}
+.fw-tasktext{background:#F8F6FF;border-radius:10px;padding:14px 16px;margin-top:8px;font-size:13.5px;line-height:1.6}
 .rec-box{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px;margin-top:14px;border:2px solid var(--purple);border-radius:var(--radius);background:var(--purple-light);text-align:center}
 .rec-box.prep{border-color:var(--orange);background:var(--orange-light)}
 .rec-time{font-family:'Fredoka',sans-serif;font-size:40px;font-weight:600;color:var(--purple-dark);line-height:1}
@@ -1029,6 +1032,16 @@ async function openFullWork(enrollmentId, blockId){
   renderFullWork();
 }
 
+function taskText(sec){
+  const html = sec.intro_html || sec.prompt_html;
+  if (!html) return '';
+  const id = 'tt-' + Math.random().toString(36).slice(2,9);
+  return `<div style="margin:8px 0">
+    <button class="fw-toggle" onclick="const b=document.getElementById('${id}');b.style.display=b.style.display==='none'?'block':'none';this.textContent=b.style.display==='none'?'📄 Показать текст задания':'📄 Скрыть текст задания'">📄 Показать текст задания</button>
+    <div id="${id}" style="display:none" class="fw-tasktext">${html}</div>
+  </div>`;
+}
+
 function renderFullWork(){
   const { full, total, enrollmentId, blockId } = window.__fullWork;
   const body = document.getElementById('reviewBody');
@@ -1051,6 +1064,7 @@ function renderFullWork(){
       return `<div class="fw-sec">
         ${sec.divider?`<div class="fw-divider">${esc(sec.divider)}</div>`:''}
         <div class="fw-sec-head"><b>${esc(sec.title||'Тест')}</b><span class="fw-auto">авто: ${correct}/${qs.length}</span></div>
+        ${taskText(sec)}
         <div style="font-size:13px;margin-top:6px">${qs.map((q,qi)=>{
           const mark = res[qi];
           return `<span class="fw-qmark ${mark===true?'ok':mark===false?'bad':''}">${qi+1}</span>`;
@@ -1064,15 +1078,18 @@ function renderFullWork(){
       return `<div class="fw-sec">
         ${sec.divider?`<div class="fw-divider">${esc(sec.divider)}</div>`:''}
         <div class="fw-sec-head"><b>${esc(sec.title||'Ввод')}</b></div>
+        ${taskText(sec)}
         <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
           ${items.map((it,ii)=>{
             const given = ans[ii]!=null ? (Array.isArray(ans[ii])?ans[ii][0]:ans[ii]) : '—';
-            const correct = it.accept ? (Array.isArray(it.accept)?it.accept[0]:it.accept) : '';
-            const ok = correct && String(given).toUpperCase().replace(/\s/g,'')===String(correct).toUpperCase().replace(/\s/g,'');
+            const accepts = Array.isArray(it.accept) ? it.accept : (it.accept ? [it.accept] : []);
+            const norm = x => String(x).toUpperCase().replace(/\s/g,'');
+            const ok = accepts.some(a => norm(given) === norm(a));
+            const correctShow = accepts.join(' / ');
             return `<div style="display:flex;gap:10px;font-size:13.5px">
               <span style="color:var(--gray);min-width:28px">${it.n||ii+1}.</span>
               <span style="font-weight:700;${ok?'color:#15803D':'color:var(--red)'}">${esc(String(given))}</span>
-              ${correct?`<span style="color:var(--gray)">(верно: ${esc(String(correct))})</span>`:''}
+              ${correctShow?`<span style="color:var(--gray)">(верно: ${esc(correctShow)})</span>`:''}
             </div>`;
           }).join('')}
         </div>
@@ -1086,6 +1103,7 @@ function renderFullWork(){
       return `<div class="fw-sec">
         ${sec.divider?`<div class="fw-divider">${esc(sec.divider)}</div>`:''}
         <div class="fw-sec-head"><b>${esc(sec.title||'Письмо')}</b><span class="fw-max">макс ${sec.max_score||'—'}</span></div>
+        ${taskText(sec)}
         ${txt ? `<div class="rev-answer">${esc(txt)}</div>` : (s.storage_path?`<div id="fw-audio-${sk}" style="font-size:13px;color:var(--gray)">📷 загружаю…</div>`:'<div style="color:var(--gray);font-size:13px">Нет ответа</div>')}
         ${gradeInput(enrollmentId, blockId, sk, sec.max_score, g)}
       </div>`;
@@ -1094,6 +1112,7 @@ function renderFullWork(){
       return `<div class="fw-sec">
         ${sec.divider?`<div class="fw-divider">${esc(sec.divider)}</div>`:''}
         <div class="fw-sec-head"><b>${esc(sec.title||'Говорение')}</b></div>
+        ${taskText(sec)}
         ${(sec.tasks||[]).map(t=>{
           const sk = 'speaking_'+t.id;
           const s = subs[sk] || {};
