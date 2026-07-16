@@ -28,6 +28,11 @@ button{font-family:inherit;cursor:pointer}
 .wrap{max-width:980px;margin:0 auto;padding:0 24px}
 
 .header{position:sticky;top:0;z-index:40;background:rgba(255,251,242,.94);backdrop-filter:blur(10px);border-bottom:1px solid var(--cream-dark)}
+.mainnav{position:sticky;top:57px;z-index:39;background:rgba(255,251,242,.94);backdrop-filter:blur(10px);border-bottom:1px solid var(--cream-dark)}
+.mainnav .wrap{display:flex;gap:4px;overflow-x:auto;padding:8px 24px}
+.navtab{white-space:nowrap;padding:9px 16px;border-radius:10px;font-size:14px;font-weight:700;color:var(--gray);text-decoration:none;transition:all .15s}
+.navtab:hover{background:var(--cream-dark)}
+.navtab.on{background:var(--purple-light);color:var(--purple-dark)}
 .header .wrap{display:flex;align-items:center;justify-content:space-between;padding:14px 24px}
 .logo{font-family:'Fredoka',sans-serif;font-size:22px;color:var(--purple);font-weight:600}
 .header .me{font-size:13px;color:var(--gray)}
@@ -221,6 +226,9 @@ button{font-family:inherit;cursor:pointer}
     <div class="me" id="me"></div>
   </div>
 </header>
+<nav class="mainnav" id="mainnav" style="display:none">
+  <div class="wrap" id="mainnavTabs"></div>
+</nav>
 
 <div class="wrap">
 
@@ -308,13 +316,26 @@ async function init(){
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { show('login'); return; }
   sessionReady = true;
-  // проверяем, методист ли (для показа кабинета проверки)
   const { data: isEditor } = await sb.rpc('learn_is_editor');
   window.__isEditor = !!isEditor;
   document.getElementById('me').innerHTML =
-    `${isEditor ? `<a href="#" onclick="go('review');return false" style="margin-right:14px;font-weight:700;color:var(--purple-dark)">✅ Проверка работ</a>` : ''}`
-    + `${esc(session.user.email)} · <button onclick="logout()">Выйти</button>`;
-  route();                          // открыть экран из текущего хеша
+    `${esc(session.user.email)} · <button onclick="logout()">Выйти</button>`;
+  renderMainNav();
+  route();
+
+  function renderMainNav(){
+    const nav = document.getElementById('mainnav');
+    const tabs = document.getElementById('mainnavTabs');
+    // вкладки по роли
+    const items = window.__isEditor
+      ? [['','📚 Курсы'],['progress','📊 Прогресс'],['journal','🗂 Журнал'],
+         ['certs','🏅 Сертификаты'],['analytics','📈 Аналитика'],['review','✅ Проверка'],['teachers','👥 Досье']]
+      : [['','📚 Курсы'],['progress','📊 Прогресс'],['certs','🏅 Сертификаты']];
+    tabs.innerHTML = items.map(([route, label]) =>
+      `<a class="navtab" data-route="${route}" href="#${route}" onclick="go('${route}');return false">${label}</a>`).join('');
+    nav.style.display = 'block';
+    highlightNav();
+  }                          // открыть экран из текущего хеша
 }
 
 // ===== Хеш-роутинг =====
@@ -335,11 +356,27 @@ function route(){
 function applyRoute(){
   const h = decodeURIComponent(location.hash.replace(/^#/, ''));
   const parts = h.split('/').filter(Boolean);
+  highlightNav();
   if (parts[0] === 'course' && parts[1]) { openCourse(parts[1], true); return; }
   if (parts[0] === 'map' && parts[1]) { openCourseMap(parts[1]); return; }
-  if (parts[0] === 'review') { openReviewCabinet(); return; }
+  if (parts[0] === 'review') { openReviewCabinet('queue'); return; }
+  if (parts[0] === 'teachers') { openReviewCabinet('teachers'); return; }
+  if (parts[0] === 'progress') { openProgress(); return; }
+  if (parts[0] === 'journal') { openJournal(); return; }
+  if (parts[0] === 'certs') { openCerts(); return; }
+  if (parts[0] === 'analytics') { openAnalytics(); return; }
   if (parts[0] === 'lesson' && parts[1] && parts[2]) { openLessonRoute(parts[1], parts[2]); return; }
   showCatalog(true);
+}
+
+function highlightNav(){
+  const h = location.hash.replace(/^#/, '').split('/')[0];
+  document.querySelectorAll('.navtab').forEach(a => {
+    const r = a.dataset.route;
+    // курсы активны и на главной, и на экране курса/урока/карты
+    const active = (r === '' && ['','course','map','lesson'].includes(h)) || (r !== '' && h === r);
+    a.classList.toggle('on', active);
+  });
 }
 function go(hash){ location.hash = hash; }
 
@@ -491,10 +528,22 @@ function openLesson(slug){
   go('lesson/' + currentCourse + '/' + slug);
 }
 
+// ===== Новые разделы (каркас, наполним по слоям) =====
+function screenStub(title, text){
+  return `<h1 style="font-size:32px;margin-bottom:8px">${title}</h1>
+    <p style="color:var(--gray);margin-bottom:24px">${text}</p>
+    <div class="note">Этот раздел скоро появится.</div>`;
+}
+async function openProgress(){ show('review'); document.getElementById('reviewBody').innerHTML = screenStub('📊 Прогресс', window.__isEditor?'Сводка прохождения по всем преподавателям.':'Ваш прогресс по курсам, дедлайны и что осталось.'); }
+async function openJournal(){ if(!window.__isEditor){go('');return;} show('review'); document.getElementById('reviewBody').innerHTML = screenStub('🗂 Журнал обучения', 'Назначение курсов преподавателям и история обучения.'); }
+async function openCerts(){ show('review'); document.getElementById('reviewBody').innerHTML = screenStub('🏅 Сертификаты', window.__isEditor?'Выписка и учёт сертификатов.':'Ваши сертификаты за пройденные курсы.'); }
+async function openAnalytics(){ if(!window.__isEditor){go('');return;} show('review'); document.getElementById('reviewBody').innerHTML = screenStub('📈 Аналитика', 'Статистика по курсам и преподавателям.'); }
+
 // ===== Кабинет методиста =====
 let reviewTab = 'queue';
-async function openReviewCabinet(){
+async function openReviewCabinet(startTab){
   if (!window.__isEditor) { go(''); return; }
+  if (startTab) reviewTab = startTab;
   show('review');
   window.__teachers = null;   // сброс кэша списка преподавателей
   const body = document.getElementById('reviewBody');
@@ -505,6 +554,7 @@ async function openReviewCabinet(){
   ]);
   window.__reviews = reviews || [];
   window.__notifs = notifs || [];
+  if (reviewTab === 'teachers') loadTeachers();
   renderReviewCabinet();
 }
 
