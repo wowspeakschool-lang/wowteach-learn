@@ -238,6 +238,37 @@ button{font-family:inherit;cursor:pointer}
 .notif-item{padding:12px 14px;border-radius:10px;margin-bottom:4px}
 .notif-item.unread{background:#FBFAFF;border-left:3px solid var(--purple)}
 .notif-item:hover{background:var(--cream)}
+.an-light{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.an-metric{background:var(--cream);border-radius:999px;padding:3px 10px;color:var(--gray)}
+.cd-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto}
+.cd-modal{background:#fff;border-radius:18px;padding:26px 30px;max-width:640px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.cd-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.cd-stat{background:var(--cream);border-radius:12px;padding:14px;text-align:center}
+.cd-num{font-family:'Fredoka',sans-serif;font-weight:600;font-size:26px;line-height:1;color:var(--purple-dark)}
+.cd-lbl{font-size:11.5px;color:var(--gray);margin-top:4px}
+.cd-lessons{border:1.5px solid var(--cream-dark);border-radius:12px;overflow:hidden}
+.cd-lhead,.cd-lrow{display:flex;align-items:center;gap:10px;padding:11px 14px}
+.cd-lhead{background:var(--purple-light);font-weight:800;font-size:12px;color:var(--purple-dark)}
+.cd-lrow{border-top:1px solid var(--cream);font-size:13.5px}
+.cd-lhead>div,.cd-lrow>div{flex:1;min-width:0}
+.start-modal-wrap{display:flex;justify-content:center;padding:40px 20px}
+.start-modal{background:#fff;border:1.5px solid var(--cream-dark);border-radius:18px;padding:40px 36px;text-align:center;max-width:440px}
+.fb-modal{background:#fff;border-radius:18px;padding:32px 34px;text-align:center;max-width:460px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.fb-stars{display:flex;gap:6px;justify-content:center;font-size:40px;color:#E5E0D5}
+.fb-star{cursor:pointer;transition:transform .1s;line-height:1}
+.fb-star:hover{transform:scale(1.15)}
+.fb-star.on{color:#F59E0B}
+.fb-dist{background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:16px}
+.fb-dist-row{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+.fb-dist-bar{flex:1;height:14px;background:var(--cream);border-radius:999px;overflow:hidden}
+.fb-dist-bar>div{height:100%;border-radius:999px;transition:width .3s}
+.fb-courses{display:flex;flex-direction:column;gap:10px}
+.fb-course{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:14px 18px;cursor:pointer}
+.fb-course:hover{border-color:var(--purple)}
+.fb-filter{border:1.5px solid var(--cream-dark);background:#fff;border-radius:999px;padding:4px 11px;font-size:12.5px;font-weight:700;color:var(--gray);cursor:pointer}
+.fb-filter.on{border-color:#F59E0B;background:#FEF3E2;color:#C2410C}
+.fb-reviews{display:flex;flex-direction:column;gap:10px;max-height:340px;overflow-y:auto}
+.fb-review{background:#FBFAF7;border:1px solid var(--cream-dark);border-radius:10px;padding:12px 14px}
 .rec-box{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px;margin-top:14px;border:2px solid var(--purple);border-radius:var(--radius);background:var(--purple-light);text-align:center}
 .rec-box.prep{border-color:var(--orange);background:var(--orange-light)}
 .rec-time{font-family:'Fredoka',sans-serif;font-size:40px;font-weight:600;color:var(--purple-dark);line-height:1}
@@ -377,7 +408,7 @@ async function init(){
     // вкладки по роли
     const items = window.__isEditor
       ? [['','📚 Курсы'],['progress','📊 Прогресс'],['journal','🗂 Журнал'],
-         ['certs','🏅 Сертификаты'],['analytics','📈 Аналитика'],['review','✅ Проверка'],['teachers','👥 Досье']]
+         ['certs','🏅 Сертификаты'],['analytics','📈 Аналитика'],['feedback','💬 Отзывы'],['review','✅ Проверка'],['teachers','👥 Досье']]
       : [['','📚 Курсы'],['progress','📊 Прогресс'],['certs','🏅 Сертификаты']];
     tabs.innerHTML = items.map(([route, label]) =>
       `<a class="navtab" data-route="${route}" href="#${route}" onclick="go('${route}');return false">${label}</a>`).join('');
@@ -413,6 +444,7 @@ function applyRoute(){
   if (parts[0] === 'journal') { openJournal(); return; }
   if (parts[0] === 'certs') { openCerts(); return; }
   if (parts[0] === 'analytics') { openAnalytics(); return; }
+  if (parts[0] === 'feedback') { openFeedback(); return; }
   if (parts[0] === 'lesson' && parts[1] && parts[2]) { openLessonRoute(parts[1], parts[2]); return; }
   showCatalog(true);
 }
@@ -785,7 +817,175 @@ async function openAnalytics(){
   renderAnalytics(data);
 }
 
+// ===== Отзывы (вкладка «Отзывы») =====
+let feedbackFilter = '';
+async function openFeedback(){
+  if(!window.__isEditor){go('');return;}
+  show('review');
+  const body = document.getElementById('reviewBody');
+  body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Загружаю отзывы…</div>';
+  const { data, error } = await sb.rpc('learn_feedback_overview');
+  if (error) { body.innerHTML = '<div class="note warn">'+esc(error.message)+'</div>'; return; }
+  renderFeedback(data);
+}
+
+function starRow(avg){
+  if (avg == null) return '<span style="color:var(--gray)">нет оценок</span>';
+  const full = Math.round(avg);
+  return `<span style="color:#F59E0B;font-size:15px">${'★'.repeat(full)}${'☆'.repeat(5-full)}</span> <b>${avg}</b>`;
+}
+
+function renderFeedback(d){
+  const body = document.getElementById('reviewBody');
+  const courses = d.courses || [];
+  const sum = d.summary || {};
+  const monthly = d.monthly || [];
+  const dist = sum.dist || {};
+  const maxDist = Math.max(1, ...Object.values(dist).map(Number));
+
+  body.innerHTML = `
+    <h1 style="font-size:32px;margin-bottom:8px">💬 Отзывы</h1>
+    <p style="color:var(--gray);margin-bottom:20px">Оценки уроков от преподавателей — уровень «Реакция».</p>
+
+    <div class="an-grid" style="margin-bottom:24px">
+      <div class="an-stat" style="border-top:3px solid #F59E0B"><div class="an-num">${sum.avg_stars||'—'}</div><div class="an-label">Средняя оценка</div></div>
+      <div class="an-stat" style="border-top:3px solid #7B61FF"><div class="an-num">${sum.total||0}</div><div class="an-label">Всего отзывов</div></div>
+    </div>
+
+    <h3 style="font-size:17px;margin:0 0 12px">Распределение оценок</h3>
+    <div class="fb-dist">
+      ${[5,4,3,2,1].map(st => {
+        const cnt = Number(dist[st]||0);
+        return `<div class="fb-dist-row">
+          <span style="min-width:44px;color:#F59E0B">${'★'.repeat(st)}</span>
+          <div class="fb-dist-bar"><div style="width:${cnt/maxDist*100}%;background:#F59E0B"></div></div>
+          <span style="min-width:30px;text-align:right;font-weight:700">${cnt}</span>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <h3 style="font-size:17px;margin:24px 0 12px">По курсам <span style="font-size:12.5px;font-weight:400;color:var(--gray)">— клик для отзывов</span></h3>
+    <div class="fb-courses">
+      ${courses.filter(c => c.count > 0).length ? courses.filter(c=>c.count>0).map(c => {
+        const light = c.avg_stars == null ? 'gray' : c.avg_stars >= 4 ? 'green' : c.avg_stars >= 3 ? 'yellow' : 'red';
+        const lc = { green:'#22C55E', yellow:'#F59E0B', red:'#DC2626', gray:'#9CA3AF' }[light];
+        return `<div class="fb-course" onclick="openCourseFeedback('${c.slug}')">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="an-light" style="background:${lc}"></span>
+            <span style="font-weight:800">${c.emoji||'📘'} ${esc(c.title)}</span>
+          </div>
+          <div style="display:flex;gap:14px;align-items:center;font-size:13.5px">
+            ${starRow(c.avg_stars)}
+            <span style="color:var(--gray)">${c.count} отз.</span>
+          </div>
+        </div>`;
+      }).join('') : '<div class="note">Отзывов пока нет.</div>'}
+    </div>`;
+}
+
+async function openCourseFeedback(slug){
+  const { data, error } = await sb.rpc('learn_course_feedback', { p_course_slug: slug });
+  if (error) { alert(error.message); return; }
+  renderCourseFeedbackModal(data);
+}
+
+let cfbStarFilter = 0;
+function renderCourseFeedbackModal(d){
+  cfbStarFilter = 0;
+  window.__cfbData = d;
+  const overlay = document.createElement('div');
+  overlay.className = 'cd-overlay';
+  overlay.id = 'cfbOverlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="cd-modal" id="cfbModal"></div>`;
+  document.body.appendChild(overlay);
+  renderCourseFeedbackContent();
+}
+
+function renderCourseFeedbackContent(){
+  const d = window.__cfbData;
+  const modal = document.getElementById('cfbModal');
+  const lessons = d.lessons || [];
+  let reviews = d.reviews || [];
+  if (cfbStarFilter) reviews = reviews.filter(r => r.stars === cfbStarFilter);
+  const fmt = s => new Date(s).toLocaleDateString('ru-RU');
+
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px">
+      <div>
+        <h2 style="font-size:22px;margin:0">${d.emoji||'📘'} ${esc(d.title)}</h2>
+        <div style="margin-top:6px">${starRow(d.avg_stars)} <span style="color:var(--gray);font-size:13px">· ${d.count} отзывов</span></div>
+      </div>
+      <button onclick="this.closest('.cd-overlay').remove()" style="background:none;border:none;font-size:24px;cursor:pointer;color:var(--gray)">×</button>
+    </div>
+
+    <h3 style="font-size:15px;margin:16px 0 8px">Средняя оценка по урокам</h3>
+    <div class="cd-lessons" style="margin-bottom:18px">
+      ${lessons.map(l => `<div class="cd-lrow">
+        <div style="flex:2;font-weight:600">${esc(l.title)}</div>
+        <div style="flex:1;text-align:right">${l.avg_stars!=null?starRow(l.avg_stars):'<span style="color:var(--gray)">—</span>'} <span style="color:var(--gray);font-size:12px">(${l.count})</span></div>
+      </div>`).join('')}
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      <h3 style="font-size:15px;margin:0">Отзывы (${reviews.length})</h3>
+      <div style="display:flex;gap:5px">
+        <button class="fb-filter ${!cfbStarFilter?'on':''}" onclick="cfbStarFilter=0;renderCourseFeedbackContent()">Все</button>
+        ${[5,4,3,2,1].map(st => `<button class="fb-filter ${cfbStarFilter===st?'on':''}" onclick="cfbStarFilter=${st};renderCourseFeedbackContent()">${st}★</button>`).join('')}
+      </div>
+    </div>
+    <div class="fb-reviews">
+      ${reviews.length ? reviews.map(r => `
+        <div class="fb-review">
+          <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+            <span style="color:#F59E0B">${'★'.repeat(r.stars)}${'☆'.repeat(5-r.stars)}</span>
+            <span style="font-size:12px;color:var(--gray)">${esc(r.teacher||'—')} · ${esc(r.lesson||'')} · ${fmt(r.created_at)}</span>
+          </div>
+          ${r.comment?`<div style="font-size:14px;margin-top:6px">${esc(r.comment)}</div>`:'<div style="font-size:13px;color:var(--gray);margin-top:4px;font-style:italic">без комментария</div>'}
+        </div>`).join('') : '<div class="note">Нет отзывов с такой оценкой.</div>'}
+    </div>`;
+}
+
 let analyticsFilter = '';
+async function openCourseDetail(slug){
+  const { data, error } = await sb.rpc('learn_course_detail', { p_course_slug: slug });
+  if (error) { alert(error.message); return; }
+  renderCourseDetail(data);
+}
+
+function renderCourseDetail(d){
+  const s = d.summary || {};
+  const lessons = d.lessons || [];
+  const overlay = document.createElement('div');
+  overlay.className = 'cd-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="cd-modal">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:18px">
+        <h2 style="font-size:22px;margin:0">${d.emoji||'📘'} ${esc(d.title)}</h2>
+        <button onclick="this.closest('.cd-overlay').remove()" style="background:none;border:none;font-size:24px;cursor:pointer;color:var(--gray)">×</button>
+      </div>
+      <div class="cd-stats">
+        <div class="cd-stat"><div class="cd-num">${s.assigned||0}</div><div class="cd-lbl">назначено</div></div>
+        <div class="cd-stat"><div class="cd-num">${s.completed||0}</div><div class="cd-lbl">завершили</div></div>
+        <div class="cd-stat"><div class="cd-num">${s.avg_score!=null?s.avg_score+'%':'—'}</div><div class="cd-lbl">средний балл</div></div>
+        <div class="cd-stat"><div class="cd-num">${s.avg_course_hours!=null?s.avg_course_hours+'ч':'—'}</div><div class="cd-lbl">среднее время</div></div>
+      </div>
+      <h3 style="font-size:16px;margin:22px 0 10px">По урокам</h3>
+      <div class="cd-lessons">
+        <div class="cd-lhead"><div style="flex:2">Урок</div><div>Прошли</div><div>Ср. балл</div><div>Ср. время</div></div>
+        ${lessons.map(l => `
+          <div class="cd-lrow">
+            <div style="flex:2;font-weight:600">${esc(l.title)}</div>
+            <div>${l.completed}</div>
+            <div>${l.avg_score!=null?`<b>${l.avg_score}%</b>`:'—'}</div>
+            <div>${l.avg_hours!=null?l.avg_hours+'ч':'—'}</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
 function renderAnalytics(a){
   const body = document.getElementById('reviewBody');
   const s = a.summary || {};
@@ -822,20 +1022,31 @@ function renderAnalytics(a){
       ${stat(s.pending_reviews||0, 'Работ на проверке', '#FF8C42')}
     </div>
 
-    <h3 style="font-size:18px;margin:28px 0 12px">🔽 Воронка по курсам</h3>
+    <h3 style="font-size:18px;margin:28px 0 12px">🔽 Воронка по курсам <span style="font-size:12.5px;font-weight:400;color:var(--gray)">— клик для детализации</span></h3>
     <div style="display:flex;flex-direction:column;gap:16px">
       ${funnel.map(f => {
-        const convStart = f.assigned ? Math.round(f.started*100/f.assigned) : 0;
-        const convDone = f.assigned ? Math.round(f.completed*100/f.assigned) : 0;
         const wStart = f.assigned ? f.started*100/f.assigned : 0;
         const wDone = f.assigned ? f.completed*100/f.assigned : 0;
-        return `<div class="an-funnel">
-          <div style="font-weight:800;margin-bottom:10px">${f.emoji||'📘'} ${esc(f.title)}
-            <span style="font-size:12.5px;color:var(--gray);font-weight:400"> · средний прогресс ${f.avg_progress}%${f.stuck>0?` · застряли ${f.stuck}`:''}</span></div>
+        const lightColor = { green:'#22C55E', yellow:'#F59E0B', red:'#DC2626', gray:'#9CA3AF' }[f.light]||'#9CA3AF';
+        return `<div class="an-funnel" onclick="openCourseDetail('${f.slug}')" style="cursor:pointer">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+            <div style="font-weight:800">
+              <span class="an-light" style="background:${lightColor}"></span>
+              ${f.emoji||'📘'} ${esc(f.title)}
+            </div>
+            <div style="display:flex;gap:10px;font-size:12.5px;align-items:center">
+              <span class="an-metric">COR <b>${f.cor}%</b></span>
+              ${f.avg_score!=null?`<span class="an-metric">ср. балл <b>${f.avg_score}%</b></span>`:''}
+            </div>
+          </div>
           <div class="fn-bar"><div class="fn-seg" style="width:100%;background:#7B61FF">Назначено: ${f.assigned}</div></div>
-          <div class="fn-bar"><div class="fn-seg" style="width:${Math.max(wStart,8)}%;background:#0EA5E9">Начали: ${f.started} (${convStart}%)</div></div>
-          <div class="fn-bar"><div class="fn-seg" style="width:${Math.max(wDone,8)}%;background:#22C55E">Завершили: ${f.completed} (${convDone}%)</div></div>
-          ${f.suspended>0?`<div style="font-size:12px;color:var(--red);margin-top:4px">🚫 приостановлены: ${f.suspended}</div>`:''}
+          <div class="fn-bar"><div class="fn-seg" style="width:${Math.max(wStart,8)}%;background:#0EA5E9">Начали: ${f.started} (${f.assigned?Math.round(wStart):0}%)</div></div>
+          <div class="fn-bar"><div class="fn-seg" style="width:${Math.max(wDone,8)}%;background:#22C55E">Завершили: ${f.completed} (${f.cor}%)</div></div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--gray);margin-top:6px">
+            ${f.not_started>0?`<span>⚪ не начали: ${f.not_started}</span>`:''}
+            ${f.stuck>0?`<span>🟡 застряли: ${f.stuck}</span>`:''}
+            ${f.suspended>0?`<span style="color:var(--red)">🔴 приостановлены: ${f.suspended}</span>`:''}
+          </div>
         </div>`;
       }).join('')}
     </div>
@@ -1486,12 +1697,41 @@ function renderCourseMap(map, dls){
     `).join('')}`;
 }
 
+function showStartLessonModal(l, keepScroll){
+  show('lesson', keepScroll);
+  const body = document.getElementById('lessonBody');
+  body.innerHTML = `<div class="start-modal-wrap">
+    <div class="start-modal">
+      <div style="font-size:44px;margin-bottom:12px">📖</div>
+      <h2 style="font-size:22px;margin-bottom:8px">${esc(l.title)}</h2>
+      <p style="color:var(--gray);margin-bottom:24px">${esc(l.summary||'Готовы приступить к уроку? Мы засечём время прохождения.')}</p>
+      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+        <button class="btn" style="font-size:16px;padding:14px 32px" onclick="startLessonConfirmed('${l.slug}')">▶ Приступить</button>
+        <button class="btn btn-ghost" style="font-size:16px;padding:14px 28px" onclick="go('course/'+currentCourse)">Отмена</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function startLessonConfirmed(slug){
+  window.__lessonStarted = window.__lessonStarted || {};
+  window.__lessonStarted[slug] = true;
+  // фиксируем старт в БД
+  await sb.rpc('learn_start_lesson', { p_course_slug: currentCourse, p_lesson_slug: slug }).catch(()=>{});
+  renderLesson(slug);
+}
+
 function renderLesson(slug, keepScroll){
   clearDirty();
   const l = (currentCourseData?.lessons||[]).find(x => x.slug === slug);
   if (!l) { go('course/' + currentCourse); return; }
   if (l.locked) { go('course/' + currentCourse); return; }
   currentLesson = l;
+  // модалка «Приступить» — если старт не зафиксирован и это препод (не редактор)
+  if (!window.__isEditor && !l.started_at && !l.done_at && !window.__lessonStarted?.[l.slug]) {
+    showStartLessonModal(l, keepScroll);
+    return;
+  }
   show('lesson', keepScroll);
   const body = document.getElementById('lessonBody');
   body.innerHTML = `
@@ -2464,10 +2704,51 @@ async function finishLesson(){
        <div style="margin-top:12px"><button class="btn btn-green" onclick="finishLesson()">Проверить ещё раз</button></div>`;
     return;
   }
-  if (data.course_done) {
-    alert('🎉 Курс пройден!');
-  }
-  await openCourse(currentCourse);
+  // мини-опрос по уроку (звёзды обязательно, текст опц.), потом переход
+  showLessonFeedback(currentCourse, currentLesson.slug, data.course_done);
+}
+
+let fbStars = 0;
+function showLessonFeedback(courseSlug, lessonSlug, courseDone){
+  const overlay = document.createElement('div');
+  overlay.className = 'cd-overlay';
+  overlay.id = 'fbOverlay';
+  fbStars = 0;
+  overlay.innerHTML = `
+    <div class="fb-modal">
+      <div style="font-size:40px;margin-bottom:8px">🎉</div>
+      <h2 style="font-size:22px;margin-bottom:6px">Урок пройден!</h2>
+      <p style="color:var(--gray);margin-bottom:18px">Оцените урок — это поможет улучшить обучение.</p>
+      <div class="fb-stars" id="fbStars">
+        ${[1,2,3,4,5].map(n => `<span class="fb-star" data-n="${n}" onclick="setFbStars(${n})">☆</span>`).join('')}
+      </div>
+      <textarea id="fbComment" placeholder="Что было полезно? Что непонятно? (по желанию)"
+        style="width:100%;min-height:70px;padding:12px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:14px;background:#FDFCF8;margin-top:16px;resize:vertical"></textarea>
+      <div style="margin-top:16px">
+        <button class="btn" style="font-size:16px;padding:13px 32px" onclick="submitLessonFeedback('${courseSlug}','${lessonSlug}',${courseDone})">Отправить</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+function setFbStars(n){
+  fbStars = n;
+  document.querySelectorAll('#fbStars .fb-star').forEach(s => {
+    s.textContent = parseInt(s.dataset.n) <= n ? '★' : '☆';
+    s.classList.toggle('on', parseInt(s.dataset.n) <= n);
+  });
+}
+
+async function submitLessonFeedback(courseSlug, lessonSlug, courseDone){
+  if (!fbStars) { alert('Пожалуйста, поставьте оценку от 1 до 5 звёзд.'); return; }
+  const comment = document.getElementById('fbComment').value.trim() || null;
+  await sb.rpc('learn_submit_feedback', {
+    p_course_slug: courseSlug, p_lesson_slug: lessonSlug, p_stars: fbStars, p_comment: comment
+  }).catch(()=>{});
+  const ov = document.getElementById('fbOverlay');
+  if (ov) ov.remove();
+  if (courseDone) alert('🎉 Курс пройден!');
+  await openCourse(courseSlug);
 }
 
 async function refreshLesson(){
