@@ -208,6 +208,27 @@ button{font-family:inherit;cursor:pointer}
 .prog-card.susp{border-color:var(--red-light);background:#FFF7F7}
 .prog-over{display:flex;flex-direction:column;gap:8px}
 .prog-orow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:12px 16px}
+.an-funnel{background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;padding:16px 18px}
+.fn-bar{margin-bottom:6px}
+.fn-seg{color:#fff;font-size:12.5px;font-weight:700;padding:7px 12px;border-radius:8px;white-space:nowrap;min-width:fit-content;transition:width .3s}
+.an-chart{display:flex;gap:6px;align-items:flex-end;height:160px;background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;padding:16px}
+.ch-col{flex:1;display:flex;flex-direction:column;align-items:center;height:100%}
+.ch-bars{flex:1;display:flex;align-items:flex-end;gap:3px;width:100%;justify-content:center}
+.ch-bar{width:40%;min-height:2px;border-radius:4px 4px 0 0;transition:height .3s}
+.ch-label{font-size:10px;color:var(--gray);margin-top:6px;white-space:nowrap}
+.fw-header{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;padding:18px 22px;margin-bottom:16px}
+.fw-total{text-align:center;background:var(--purple-light);border-radius:12px;padding:10px 20px}
+.fw-total-num{font-family:'Fredoka',sans-serif;font-weight:600;font-size:28px;color:var(--purple-dark);line-height:1}
+.fw-divider{font-family:'Fredoka',sans-serif;font-weight:600;font-size:16px;color:var(--purple-dark);margin:20px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--cream-dark)}
+.fw-sec{background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:16px 18px;margin-bottom:12px}
+.fw-sec-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;font-size:15px}
+.fw-auto{font-size:12.5px;font-weight:800;background:var(--green-light);color:#15803D;border-radius:999px;padding:3px 12px}
+.fw-max{font-size:12px;font-weight:700;color:var(--gray)}
+.fw-qmark{display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;border-radius:6px;font-size:12px;font-weight:700;margin:2px;background:var(--cream-dark);color:var(--gray)}
+.fw-qmark.ok{background:var(--green-light);color:#15803D}
+.fw-qmark.bad{background:var(--red-light);color:var(--red)}
+.fw-task{border-top:1px solid var(--cream);padding-top:12px;margin-top:12px}
+.fw-grade{background:#FBFAFF;border-radius:10px;padding:12px 14px;margin-top:12px}
 .rec-box{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px;margin-top:14px;border:2px solid var(--purple);border-radius:var(--radius);background:var(--purple-light);text-align:center}
 .rec-box.prep{border-color:var(--orange);background:var(--orange-light)}
 .rec-time{font-family:'Fredoka',sans-serif;font-size:40px;font-weight:600;color:var(--purple-dark);line-height:1}
@@ -674,7 +695,13 @@ function renderJournal(){
     </div>
 
     <h3 style="font-size:18px;margin:26px 0 12px">История назначений (${journal.length})</h3>
-    ${journal.length ? `<div class="journal-list">${journal.map(j => `
+    <input id="jrn-search" placeholder="🔍 Поиск по преподавателю или курсу…" value="${esc(window.__journalSearch||'')}"
+      oninput="window.__journalSearch=this.value;renderJournal();document.getElementById('jrn-search').focus()"
+      style="width:100%;padding:10px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:14px;background:#fff;margin-bottom:12px">
+    ${(() => {
+      const q = (window.__journalSearch||'').trim().toLowerCase();
+      const filtered = q ? journal.filter(j => (j.teacher||'').toLowerCase().includes(q) || (j.course||'').toLowerCase().includes(q)) : journal;
+      return filtered.length ? `<div class="journal-list">${filtered.map(j => `
       <div class="journal-row">
         <div style="flex:1;min-width:180px">
           <div style="font-weight:700">${esc(j.teacher)}</div>
@@ -690,7 +717,8 @@ function renderJournal(){
             :`<span class="teach-chip">${j.done_lessons}/${j.total_lessons}</span>`}
         </div>
         <button onclick="unassign('${j.enrollment_id}')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12.5px">снять</button>
-      </div>`).join('')}</div>` : '<div class="note">Назначений пока нет.</div>'}`;
+      </div>`).join('')}</div>` : '<div class="note">Ничего не найдено.</div>';
+    })()}`;
   onJournalModeChange();
 }
 
@@ -747,22 +775,33 @@ async function openAnalytics(){
   renderAnalytics(data);
 }
 
+let analyticsFilter = '';
 function renderAnalytics(a){
   const body = document.getElementById('reviewBody');
   const s = a.summary || {};
-  const courses = a.courses || [];
+  const funnel = a.funnel || [];
+  const monthly = a.monthly || [];
+  const learning = a.learning || [];
+  window.__analytics = a;
   const monthName = new Date().toLocaleDateString('ru-RU', { month:'long' });
   const year = new Date().getFullYear();
 
   const stat = (val, label, color) => `
     <div class="an-stat" style="border-top:3px solid ${color}">
-      <div class="an-num">${val}</div>
-      <div class="an-label">${label}</div>
+      <div class="an-num">${val}</div><div class="an-label">${label}</div>
     </div>`;
+
+  // максимум для графика
+  const maxM = Math.max(1, ...monthly.map(m => Math.max(m.assigned, m.completed)));
+
+  // курсы для фильтра «учатся сейчас»
+  const courseFilters = [...new Set(learning.map(l => l.course_slug))]
+    .map(slug => { const c = learning.find(l => l.course_slug === slug); return { slug, title: c.title, emoji: c.emoji }; });
+  const filteredLearning = analyticsFilter ? learning.filter(l => l.course_slug === analyticsFilter) : learning;
 
   body.innerHTML = `
     <h1 style="font-size:32px;margin-bottom:8px">📈 Аналитика</h1>
-    <p style="color:var(--gray);margin-bottom:20px">Статистика обучения по курсам и преподавателям.</p>
+    <p style="color:var(--gray);margin-bottom:20px">Воронка, динамика и конверсия обучения.</p>
 
     <div class="an-grid">
       ${stat(s.teachers_total||0, 'Всего преподавателей', '#7B61FF')}
@@ -773,32 +812,53 @@ function renderAnalytics(a){
       ${stat(s.pending_reviews||0, 'Работ на проверке', '#FF8C42')}
     </div>
 
-    <h3 style="font-size:18px;margin:28px 0 12px">По курсам</h3>
-    <div class="an-table">
-      <div class="an-thead">
-        <div style="flex:2">Курс</div>
-        <div>Назначено</div>
-        <div>Проходят</div>
-        <div>Завершили</div>
-        <div>За ${monthName}</div>
-        <div>За ${year}</div>
-      </div>
-      ${courses.map(c => `
-        <div class="an-trow">
-          <div style="flex:2;font-weight:700">${c.emoji||'📘'} ${esc(c.title)}</div>
-          <div>${c.assigned}</div>
-          <div>${c.in_progress}</div>
-          <div><b style="color:#15803D">${c.completed}</b></div>
-          <div>${c.completed_month}</div>
-          <div>${c.completed_year}</div>
-        </div>`).join('')}
+    <h3 style="font-size:18px;margin:28px 0 12px">🔽 Воронка по курсам</h3>
+    <div style="display:flex;flex-direction:column;gap:16px">
+      ${funnel.map(f => {
+        const convStart = f.assigned ? Math.round(f.started*100/f.assigned) : 0;
+        const convDone = f.assigned ? Math.round(f.completed*100/f.assigned) : 0;
+        const wStart = f.assigned ? f.started*100/f.assigned : 0;
+        const wDone = f.assigned ? f.completed*100/f.assigned : 0;
+        return `<div class="an-funnel">
+          <div style="font-weight:800;margin-bottom:10px">${f.emoji||'📘'} ${esc(f.title)}
+            <span style="font-size:12.5px;color:var(--gray);font-weight:400"> · средний прогресс ${f.avg_progress}%${f.stuck>0?` · застряли ${f.stuck}`:''}</span></div>
+          <div class="fn-bar"><div class="fn-seg" style="width:100%;background:#7B61FF">Назначено: ${f.assigned}</div></div>
+          <div class="fn-bar"><div class="fn-seg" style="width:${Math.max(wStart,8)}%;background:#0EA5E9">Начали: ${f.started} (${convStart}%)</div></div>
+          <div class="fn-bar"><div class="fn-seg" style="width:${Math.max(wDone,8)}%;background:#22C55E">Завершили: ${f.completed} (${convDone}%)</div></div>
+          ${f.suspended>0?`<div style="font-size:12px;color:var(--red);margin-top:4px">🚫 приостановлены: ${f.suspended}</div>`:''}
+        </div>`;
+      }).join('')}
     </div>
 
-    ${(a.learning_teachers||[]).length ? `
-      <h3 style="font-size:18px;margin:28px 0 12px">Сейчас проходят обучение (${a.learning_teachers.length})</h3>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        ${a.learning_teachers.map(t => `<span class="teach-chip">${esc(t.name)}</span>`).join('')}
-      </div>` : ''}`;
+    <h3 style="font-size:18px;margin:28px 0 12px">📅 Динамика по месяцам</h3>
+    <div class="an-chart">
+      ${monthly.map(m => `
+        <div class="ch-col">
+          <div class="ch-bars">
+            <div class="ch-bar" style="height:${m.assigned/maxM*100}%;background:#7B61FF" title="назначено: ${m.assigned}"></div>
+            <div class="ch-bar" style="height:${m.completed/maxM*100}%;background:#22C55E" title="завершили: ${m.completed}"></div>
+          </div>
+          <div class="ch-label">${esc(m.label)}</div>
+        </div>`).join('')}
+    </div>
+    <div style="display:flex;gap:16px;font-size:12.5px;color:var(--gray);margin-top:8px">
+      <span>🟣 назначено</span><span>🟢 завершили</span>
+    </div>
+
+    <h3 style="font-size:18px;margin:28px 0 12px">Учатся сейчас (${filteredLearning.length})</h3>
+    <div class="teach-filters" style="margin-bottom:12px">
+      <button class="teach-filter ${!analyticsFilter?'on':''}" onclick="analyticsFilter='';renderAnalytics(window.__analytics)">Все ${learning.length}</button>
+      ${courseFilters.map(c => `<button class="teach-filter ${analyticsFilter===c.slug?'on':''}" onclick="analyticsFilter='${c.slug}';renderAnalytics(window.__analytics)">${c.emoji||''} ${esc(c.title)} ${learning.filter(l=>l.course_slug===c.slug).length}</button>`).join('')}
+    </div>
+    <div class="an-table">
+      <div class="an-thead"><div style="flex:2">Преподаватель</div><div style="flex:2">Курс</div><div>Дедлайн</div></div>
+      ${filteredLearning.map(l => `
+        <div class="an-trow">
+          <div style="flex:2;font-weight:600">${esc(l.teacher)}</div>
+          <div style="flex:2">${l.emoji||'📘'} ${esc(l.course)}</div>
+          <div style="font-size:13px;color:var(--gray)">${l.deadline?new Date(l.deadline).toLocaleDateString('ru-RU'):'—'}</div>
+        </div>`).join('')}
+    </div>`;
 }
 
 // ===== Кабинет методиста =====
@@ -826,11 +886,20 @@ function renderReviewCabinet(){
   const notifs = window.__notifs || [];
   const unread = notifs.filter(n => !n.is_read).length;
 
+  // Досье — отдельный экран (список преподавателей), без под-вкладок проверки
+  if (reviewTab === 'teachers') {
+    body.innerHTML = `
+      <h1 style="font-size:32px;margin-bottom:16px">👥 Досье преподавателей</h1>
+      <div id="revContent"></div>`;
+    renderReviewContent();
+    return;
+  }
+
+  // Проверка — очередь + уведомления
   body.innerHTML = `
     <h1 style="font-size:32px;margin-bottom:16px">✅ Проверка работ</h1>
     <div class="rev-tabs">
       <button class="rev-tab ${reviewTab==='queue'?'on':''}" onclick="switchReviewTab('queue')">📋 Очередь (${reviews.length})</button>
-      <button class="rev-tab ${reviewTab==='teachers'?'on':''}" onclick="switchReviewTab('teachers')">👥 Преподаватели</button>
       <button class="rev-tab ${reviewTab==='notifs'?'on':''}" onclick="switchReviewTab('notifs')">🔔 Уведомления${unread?` <span class="rev-dot">${unread}</span>`:''}</button>
     </div>
     <div id="revContent"></div>`;
@@ -849,10 +918,26 @@ function renderReviewContent(){
   if (reviewTab === 'queue') {
     const reviews = window.__reviews || [];
     if (!reviews.length) { el.innerHTML = '<div class="note ok">🎉 Очередь пуста — все работы проверены.</div>'; return; }
-    // группируем по ученику + курсу
-    el.innerHTML = reviews.map((r, i) => renderReviewCard(r, i)).join('');
-    // подгружаем аудиоплееры для устных
-    reviews.forEach((r, i) => { if (r.has_file) loadReviewAudio(r, i); });
+    // группируем по работе: enrollment + block (одна работа = один пробник препода)
+    const works = {};
+    reviews.forEach(r => {
+      const key = r.enrollment_id + '|' + (r.block_id || r.id);
+      if (!works[key]) works[key] = { ...r, count: 0, sections: [] };
+      works[key].count++;
+      works[key].sections.push(r.section_key);
+    });
+    el.innerHTML = Object.entries(works).map(([key, w]) => {
+      const [enr, blk] = key.split('|');
+      return `<div class="rev-card">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center">
+          <div>
+            <div style="font-weight:800;font-size:16px">${esc(w.student||'—')}</div>
+            <div style="font-size:12.5px;color:var(--gray)">${esc(w.course||'')} · ${esc(w.lesson||'')} · ${w.count} ${w.count===1?'задание':'заданий'} на проверку</div>
+          </div>
+          <button class="btn" style="padding:10px 22px" onclick="openFullWork('${enr}','${w.block_id||w.id}')">Открыть работу целиком →</button>
+        </div>
+      </div>`;
+    }).join('');
   } else {
     const notifs = window.__notifs || [];
     if (!notifs.length) { el.innerHTML = '<div class="note">Уведомлений пока нет.</div>'; return; }
@@ -928,6 +1013,178 @@ async function resumeAccess(enrollmentId){
   if (error) { alert(error.message); return; }
   alert('Доступ возвращён.');
   openReviewCabinet();
+}
+
+// ===== Проверка работы целиком =====
+async function openFullWork(enrollmentId, blockId){
+  show('review');
+  const body = document.getElementById('reviewBody');
+  body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Загружаю работу…</div>';
+  const [{ data: full, error }, { data: total }] = await Promise.all([
+    sb.rpc('learn_exam_full', { p_enrollment_id: enrollmentId, p_block_id: blockId }),
+    sb.rpc('learn_exam_total', { p_enrollment_id: enrollmentId, p_block_id: blockId })
+  ]);
+  if (error) { body.innerHTML = '<div class="note warn">'+esc(error.message)+'</div>'; return; }
+  window.__fullWork = { full, total, enrollmentId, blockId };
+  renderFullWork();
+}
+
+function renderFullWork(){
+  const { full, total, enrollmentId, blockId } = window.__fullWork;
+  const body = document.getElementById('reviewBody');
+  const p = full.payload || {};
+  const subs = full.submissions || {};
+  const grades = full.grades || {};
+  const secs = p.sections || [];
+
+  let si = -1;
+  const sectionsHtml = secs.map(sec => {
+    si++;
+    const kind = sec.kind;
+    if (kind === 'audio') return `<div class="fw-divider">${esc(sec.divider||sec.title||'Аудирование')}</div>`;
+
+    if (kind === 'auto_quiz') {
+      const s = subs['quiz_'+si] || {};
+      const res = s.results || {};
+      const qs = sec.quiz?.questions || [];
+      const correct = Object.values(res).filter(v => v===true).length;
+      return `<div class="fw-sec">
+        ${sec.divider?`<div class="fw-divider">${esc(sec.divider)}</div>`:''}
+        <div class="fw-sec-head"><b>${esc(sec.title||'Тест')}</b><span class="fw-auto">авто: ${correct}/${qs.length}</span></div>
+        <div style="font-size:13px;margin-top:6px">${qs.map((q,qi)=>{
+          const mark = res[qi];
+          return `<span class="fw-qmark ${mark===true?'ok':mark===false?'bad':''}">${qi+1}</span>`;
+        }).join('')}</div>
+      </div>`;
+    }
+    if (kind === 'exact_input') {
+      const s = subs['exact_'+si] || {};
+      const ans = s.answers || {};
+      const items = sec.items || [];
+      return `<div class="fw-sec">
+        ${sec.divider?`<div class="fw-divider">${esc(sec.divider)}</div>`:''}
+        <div class="fw-sec-head"><b>${esc(sec.title||'Ввод')}</b></div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+          ${items.map((it,ii)=>{
+            const given = ans[ii]!=null ? (Array.isArray(ans[ii])?ans[ii][0]:ans[ii]) : '—';
+            const correct = it.accept ? (Array.isArray(it.accept)?it.accept[0]:it.accept) : '';
+            const ok = correct && String(given).toUpperCase().replace(/\s/g,'')===String(correct).toUpperCase().replace(/\s/g,'');
+            return `<div style="display:flex;gap:10px;font-size:13.5px">
+              <span style="color:var(--gray);min-width:28px">${it.n||ii+1}.</span>
+              <span style="font-weight:700;${ok?'color:#15803D':'color:var(--red)'}">${esc(String(given))}</span>
+              ${correct?`<span style="color:var(--gray)">(верно: ${esc(String(correct))})</span>`:''}
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }
+    if (kind === 'writing') {
+      const sk = 'writing_'+si;
+      const s = subs[sk] || {};
+      const g = grades[sk] || {};
+      const txt = s.answers?.text;
+      return `<div class="fw-sec">
+        ${sec.divider?`<div class="fw-divider">${esc(sec.divider)}</div>`:''}
+        <div class="fw-sec-head"><b>${esc(sec.title||'Письмо')}</b><span class="fw-max">макс ${sec.max_score||'—'}</span></div>
+        ${txt ? `<div class="rev-answer">${esc(txt)}</div>` : (s.storage_path?`<div id="fw-audio-${sk}" style="font-size:13px;color:var(--gray)">📷 загружаю…</div>`:'<div style="color:var(--gray);font-size:13px">Нет ответа</div>')}
+        ${gradeInput(enrollmentId, blockId, sk, sec.max_score, g)}
+      </div>`;
+    }
+    if (kind === 'speaking') {
+      return `<div class="fw-sec">
+        ${sec.divider?`<div class="fw-divider">${esc(sec.divider)}</div>`:''}
+        <div class="fw-sec-head"><b>${esc(sec.title||'Говорение')}</b></div>
+        ${(sec.tasks||[]).map(t=>{
+          const sk = 'speaking_'+t.id;
+          const s = subs[sk] || {};
+          const g = grades[sk] || {};
+          return `<div class="fw-task">
+            <div style="font-weight:700;font-size:14px">${esc(t.label||t.id)} <span class="fw-max">макс ${t.max_score||'—'}</span></div>
+            ${(s.meta?.parts?.length||s.storage_path)?`<div id="fw-audio-${sk}" style="margin-top:8px;font-size:13px;color:var(--gray)">🎧 загружаю запись…</div>`:'<div style="color:var(--gray);font-size:13px;margin-top:6px">Нет записи</div>'}
+            ${gradeInput(enrollmentId, blockId, sk, t.max_score, g)}
+          </div>`;
+        }).join('')}
+      </div>`;
+    }
+    if (kind === 'reflection') {
+      const s = subs['reflection_'+si] || subs['reflection'] || {};
+      return `<div class="fw-sec">
+        ${sec.divider?`<div class="fw-divider">${esc(sec.divider)}</div>`:''}
+        <div class="fw-sec-head"><b>${esc(sec.title||'Рефлексия')}</b></div>
+        ${s.answers?.text?`<div class="rev-answer">${esc(s.answers.text)}</div>`:'<div style="color:var(--gray);font-size:13px">Нет ответа</div>'}
+      </div>`;
+    }
+    return '';
+  }).join('');
+
+  body.innerHTML = `
+    <button class="btn btn-ghost" style="margin-bottom:16px;padding:8px 16px;font-size:13px" onclick="openReviewCabinet('queue')">← К очереди</button>
+    <div class="fw-header">
+      <div>
+        <h1 style="font-size:26px;margin:0">${esc(full.teacher||'—')}</h1>
+        <div style="font-size:13px;color:var(--gray)">${esc(full.course||'')} · ${esc(p.title||'Пробник')}</div>
+      </div>
+      <div class="fw-total" id="fw-total">
+        <div class="fw-total-num">${total?total.total:0} / ${total?total.max:'—'}</div>
+        <div style="font-size:11.5px;color:var(--gray)">авто ${total?total.auto:0} + ручной ${total?total.manual:0}</div>
+      </div>
+    </div>
+    ${sectionsHtml}
+    <div style="height:40px"></div>`;
+
+  Object.entries(subs).forEach(([sk, s]) => {
+    if (s.meta?.parts?.length || s.storage_path) loadFullWorkMedia(sk, s);
+  });
+}
+
+function gradeInput(enr, blk, sk, max, g){
+  const val = g.score!=null ? g.score : '';
+  const cmt = g.comment || '';
+  return `<div class="fw-grade">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:13px;font-weight:700">Балл:</label>
+      <input type="number" id="gr-score-${sk}" min="0" max="${max||99}" step="0.5" value="${val}"
+        style="width:80px;padding:8px 10px;border:2px solid var(--cream-dark);border-radius:8px;font-size:15px;font-weight:700;background:#FDFCF8">
+      <span style="color:var(--gray);font-size:13px">из ${max||'—'}</span>
+    </div>
+    <textarea id="gr-comment-${sk}" placeholder="Комментарий преподавателю…"
+      style="width:100%;min-height:50px;padding:8px 12px;border:2px solid var(--cream-dark);border-radius:8px;font-size:13.5px;background:#FDFCF8;margin-top:8px;resize:vertical">${esc(cmt)}</textarea>
+    <button class="btn btn-green" style="padding:7px 18px;font-size:13px;margin-top:8px" onclick="saveGrade('${enr}','${blk}','${sk}',${max||0})">Сохранить балл</button>
+  </div>`;
+}
+
+async function saveGrade(enr, blk, sk, max){
+  const score = parseFloat(document.getElementById('gr-score-'+sk).value);
+  const comment = document.getElementById('gr-comment-'+sk).value.trim() || null;
+  if (isNaN(score)) { alert('Введите балл.'); return; }
+  if (score < 0 || (max && score > max)) { alert('Балл должен быть от 0 до '+max+'.'); return; }
+  const btn = event.target;
+  const { error } = await sb.rpc('learn_grade_task', {
+    p_enrollment_id: enr, p_block_id: blk, p_section_key: sk,
+    p_score: score, p_max_score: max||null, p_comment: comment, p_approved: true
+  });
+  if (error) { alert(error.message); return; }
+  const { data: total } = await sb.rpc('learn_exam_total', { p_enrollment_id: enr, p_block_id: blk });
+  window.__fullWork.total = total;
+  const tEl = document.getElementById('fw-total');
+  if (tEl && total) tEl.innerHTML = `<div class="fw-total-num">${total.total} / ${total.max}</div><div style="font-size:11.5px;color:var(--gray)">авто ${total.auto} + ручной ${total.manual}</div>`;
+  btn.textContent = '✓ Сохранено'; btn.style.background = 'var(--gray)';
+  setTimeout(()=>{ btn.textContent='Сохранить балл'; btn.style.background=''; }, 1500);
+}
+
+async function loadFullWorkMedia(sk, s){
+  const holder = document.getElementById('fw-audio-'+sk);
+  if (!holder) return;
+  const paths = s.meta?.parts?.length ? s.meta.parts : (s.storage_path ? [s.storage_path] : []);
+  const urls = [];
+  for (const path of paths) {
+    try { const { data } = await sb.storage.from('learn-tasks').createSignedUrl(path, 3600);
+      if (data?.signedUrl) urls.push({ url: data.signedUrl, path }); } catch(_){}
+  }
+  if (!urls.length) { holder.innerHTML = '<span style="color:var(--gray)">Файл недоступен</span>'; return; }
+  holder.innerHTML = urls.map(u => u.path.match(/\.(png|jpg|jpeg|webp)$/i)
+    ? `<img src="${u.url}" style="max-width:100%;border-radius:10px;margin-top:6px">`
+    : `<audio controls src="${u.url}" style="width:100%;margin-top:6px"></audio>`).join('');
 }
 
 // ===== Преподаватели (досье) =====
