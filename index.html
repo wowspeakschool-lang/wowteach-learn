@@ -1130,7 +1130,7 @@ function renderReviewCabinet(){
 function switchReviewTab(t){ reviewTab = t; renderReviewCabinet(); if (t==='notifs') markNotifsRead(); if (t==='teachers') loadTeachers(); }
 
 async function markNotifsRead(){
-  await sb.rpc('learn_mark_notifications_read').catch(()=>{});
+  try { await sb.rpc('learn_mark_notifications_read'); } catch(_){}
 }
 
 function renderReviewContent(){
@@ -1717,7 +1717,7 @@ async function startLessonConfirmed(slug){
   window.__lessonStarted = window.__lessonStarted || {};
   window.__lessonStarted[slug] = true;
   // фиксируем старт в БД
-  await sb.rpc('learn_start_lesson', { p_course_slug: currentCourse, p_lesson_slug: slug }).catch(()=>{});
+  try { await sb.rpc('learn_start_lesson', { p_course_slug: currentCourse, p_lesson_slug: slug }); } catch(_){}
   renderLesson(slug);
 }
 
@@ -1992,10 +1992,10 @@ async function playListening(blockId, src){
   audio.addEventListener('ended', async () => {
     wrap.innerHTML = '<div class="note ok">🎧 Аудирование завершено. Переходите к ответам ниже.</div>';
     // фиксируем факт прослушивания
-    await sb.rpc('learn_submit_exam', {
+    try { await sb.rpc('learn_submit_exam', {
       p_block_id: blockId, p_section: 'audio', p_kind: 'text',
       p_answers: { played: true }, p_meta: { played_at: new Date().toISOString() }
-    }).catch(()=>{});
+    }); } catch(_){}
   });
 
   try {
@@ -2742,9 +2742,9 @@ function setFbStars(n){
 async function submitLessonFeedback(courseSlug, lessonSlug, courseDone){
   if (!fbStars) { alert('Пожалуйста, поставьте оценку от 1 до 5 звёзд.'); return; }
   const comment = document.getElementById('fbComment').value.trim() || null;
-  await sb.rpc('learn_submit_feedback', {
+  try { await sb.rpc('learn_submit_feedback', {
     p_course_slug: courseSlug, p_lesson_slug: lessonSlug, p_stars: fbStars, p_comment: comment
-  }).catch(()=>{});
+  }); } catch(_){}
   const ov = document.getElementById('fbOverlay');
   if (ov) ov.remove();
   if (courseDone) alert('🎉 Курс пройден!');
