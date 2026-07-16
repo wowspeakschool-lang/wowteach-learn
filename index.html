@@ -195,6 +195,19 @@ button{font-family:inherit;cursor:pointer}
 .jf-input{flex:1;min-width:180px;padding:10px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:14px;background:#FDFCF8;font-family:inherit}
 .journal-list{display:flex;flex-direction:column;gap:8px}
 .journal-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:12px 16px}
+.an-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.an-stat{background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;padding:18px 20px}
+.an-num{font-family:'Fredoka',sans-serif;font-weight:600;font-size:34px;line-height:1}
+.an-label{font-size:12.5px;color:var(--gray);margin-top:6px}
+.an-table{background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;overflow:hidden}
+.an-thead,.an-trow{display:flex;align-items:center;gap:10px;padding:12px 16px}
+.an-thead{background:var(--purple-light);font-weight:800;font-size:12.5px;color:var(--purple-dark)}
+.an-trow{border-top:1px solid var(--cream)}
+.an-thead>div,.an-trow>div{flex:1;min-width:0}
+.prog-card{background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;padding:18px 20px;margin-bottom:14px}
+.prog-card.susp{border-color:var(--red-light);background:#FFF7F7}
+.prog-over{display:flex;flex-direction:column;gap:8px}
+.prog-orow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:12px 16px}
 .rec-box{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px;margin-top:14px;border:2px solid var(--purple);border-radius:var(--radius);background:var(--purple-light);text-align:center}
 .rec-box.prep{border-color:var(--orange);background:var(--orange-light)}
 .rec-time{font-family:'Fredoka',sans-serif;font-size:40px;font-weight:600;color:var(--purple-dark);line-height:1}
@@ -277,7 +290,6 @@ button{font-family:inherit;cursor:pointer}
 
   <!-- Кабинет методиста -->
   <div id="review">
-    <a class="back" href="#" onclick="go('');return false">← Все курсы</a>
     <div id="reviewBody"></div>
   </div>
 
@@ -539,7 +551,81 @@ function screenStub(title, text){
     <p style="color:var(--gray);margin-bottom:24px">${text}</p>
     <div class="note">Этот раздел скоро появится.</div>`;
 }
-async function openProgress(){ show('review'); document.getElementById('reviewBody').innerHTML = screenStub('📊 Прогресс', window.__isEditor?'Сводка прохождения по всем преподавателям.':'Ваш прогресс по курсам, дедлайны и что осталось.'); }
+async function openProgress(){
+  show('review');
+  const body = document.getElementById('reviewBody');
+  body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Загружаю…</div>';
+  if (window.__isEditor) {
+    const { data, error } = await sb.rpc('learn_progress_overview');
+    if (error) { body.innerHTML = '<div class="note warn">'+esc(error.message)+'</div>'; return; }
+    renderProgressOverview(data || []);
+  } else {
+    const { data, error } = await sb.rpc('learn_my_progress');
+    if (error) { body.innerHTML = '<div class="note warn">'+esc(error.message)+'</div>'; return; }
+    renderMyProgress(data || []);
+  }
+}
+
+function progressBar(done, total){
+  const pct = total ? Math.round(done*100/total) : 0;
+  return `<div class="bar" style="height:8px;margin-top:6px"><i style="width:${pct}%"></i></div>`;
+}
+
+function renderMyProgress(courses){
+  const body = document.getElementById('reviewBody');
+  const fmt = s => s ? new Date(s).toLocaleDateString('ru-RU') : null;
+  if (!courses.length) {
+    body.innerHTML = '<h1 style="font-size:32px;margin-bottom:8px">📊 Прогресс</h1><div class="note">У вас пока нет назначенных курсов.</div>';
+    return;
+  }
+  body.innerHTML = `
+    <h1 style="font-size:32px;margin-bottom:20px">📊 Мой прогресс</h1>
+    ${courses.map(c => {
+      const dl = fmt(c.deadline);
+      const overdue = c.deadline && new Date(c.deadline) < Date.now() && !c.completed_at;
+      return `<div class="prog-card ${c.suspended?'susp':''}">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div style="font-weight:800;font-size:16px">${c.emoji||'📘'} ${esc(c.title)}</div>
+          <div style="font-size:13px;color:var(--gray)">${c.done_lessons}/${c.total_lessons} уроков</div>
+        </div>
+        ${progressBar(c.done_lessons, c.total_lessons)}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center">
+          ${c.completed_at ? '<span class="teach-chip ok">✅ курс пройден</span>'
+            : c.suspended ? '<span class="teach-chip bad">🚫 доступ приостановлен</span>'
+            : c.next_lesson ? `<span style="font-size:13px;color:var(--gray)">Дальше: <b>${esc(c.next_lesson)}</b></span>` : ''}
+          ${dl && !c.completed_at ? `<span class="teach-chip ${overdue?'bad':''}">${overdue?'⚠️ просрочен':'дедлайн'} ${dl}</span>` : ''}
+          ${c.missed_count>0?`<span class="teach-chip bad">${c.missed_count} пропуск.</span>`:''}
+        </div>
+        ${!c.suspended ? `<button class="btn btn-ghost" style="margin-top:12px;padding:8px 18px;font-size:13px" onclick="go('course/${c.slug}')">Открыть курс →</button>` : ''}
+      </div>`;
+    }).join('')}`;
+}
+
+function renderProgressOverview(rows){
+  const body = document.getElementById('reviewBody');
+  if (!rows.length) {
+    body.innerHTML = '<h1 style="font-size:32px;margin-bottom:8px">📊 Прогресс</h1><div class="note">Пока нет преподавателей с назначенными курсами.</div>';
+    return;
+  }
+  body.innerHTML = `
+    <h1 style="font-size:32px;margin-bottom:8px">📊 Прогресс преподавателей</h1>
+    <p style="color:var(--gray);margin-bottom:20px">Сводка прохождения по всем, у кого назначены курсы.</p>
+    <div class="prog-over">
+      ${rows.map(r => `
+        <div class="prog-orow">
+          <div style="font-weight:700;min-width:160px;flex:1">${esc(r.teacher)}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;flex:3">
+            ${(r.courses||[]).map(c => {
+              const pct = c.total ? Math.round(c.done*100/c.total) : 0;
+              const overdue = c.deadline && new Date(c.deadline) < Date.now() && !c.completed;
+              const cls = c.completed?'ok':c.suspended?'bad':overdue?'bad':'';
+              return `<span class="teach-chip ${cls}" title="${esc(c.title)}">${c.emoji||'📘'} ${c.done}/${c.total}${c.completed?' ✅':overdue?' ⚠️':''}</span>`;
+            }).join('')}
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
 async function openJournal(){
   if(!window.__isEditor){go('');return;}
   show('review');
@@ -651,7 +737,69 @@ async function unassign(enrollmentId){
   openJournal();
 }
 async function openCerts(){ show('review'); document.getElementById('reviewBody').innerHTML = screenStub('🏅 Сертификаты', window.__isEditor?'Выписка и учёт сертификатов.':'Ваши сертификаты за пройденные курсы.'); }
-async function openAnalytics(){ if(!window.__isEditor){go('');return;} show('review'); document.getElementById('reviewBody').innerHTML = screenStub('📈 Аналитика', 'Статистика по курсам и преподавателям.'); }
+async function openAnalytics(){
+  if(!window.__isEditor){go('');return;}
+  show('review');
+  const body = document.getElementById('reviewBody');
+  body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Считаю статистику…</div>';
+  const { data, error } = await sb.rpc('learn_analytics');
+  if (error) { body.innerHTML = '<div class="note warn">'+esc(error.message)+'</div>'; return; }
+  renderAnalytics(data);
+}
+
+function renderAnalytics(a){
+  const body = document.getElementById('reviewBody');
+  const s = a.summary || {};
+  const courses = a.courses || [];
+  const monthName = new Date().toLocaleDateString('ru-RU', { month:'long' });
+  const year = new Date().getFullYear();
+
+  const stat = (val, label, color) => `
+    <div class="an-stat" style="border-top:3px solid ${color}">
+      <div class="an-num">${val}</div>
+      <div class="an-label">${label}</div>
+    </div>`;
+
+  body.innerHTML = `
+    <h1 style="font-size:32px;margin-bottom:8px">📈 Аналитика</h1>
+    <p style="color:var(--gray);margin-bottom:20px">Статистика обучения по курсам и преподавателям.</p>
+
+    <div class="an-grid">
+      ${stat(s.teachers_total||0, 'Всего преподавателей', '#7B61FF')}
+      ${stat(s.learning_now||0, 'Учатся сейчас', '#0EA5E9')}
+      ${stat(s.completed_month||0, `Завершили в ${monthName}`, '#22C55E')}
+      ${stat(s.completed_year||0, `Завершили в ${year}`, '#22C55E')}
+      ${stat(s.suspended_now||0, 'Приостановлены', '#DC2626')}
+      ${stat(s.pending_reviews||0, 'Работ на проверке', '#FF8C42')}
+    </div>
+
+    <h3 style="font-size:18px;margin:28px 0 12px">По курсам</h3>
+    <div class="an-table">
+      <div class="an-thead">
+        <div style="flex:2">Курс</div>
+        <div>Назначено</div>
+        <div>Проходят</div>
+        <div>Завершили</div>
+        <div>За ${monthName}</div>
+        <div>За ${year}</div>
+      </div>
+      ${courses.map(c => `
+        <div class="an-trow">
+          <div style="flex:2;font-weight:700">${c.emoji||'📘'} ${esc(c.title)}</div>
+          <div>${c.assigned}</div>
+          <div>${c.in_progress}</div>
+          <div><b style="color:#15803D">${c.completed}</b></div>
+          <div>${c.completed_month}</div>
+          <div>${c.completed_year}</div>
+        </div>`).join('')}
+    </div>
+
+    ${(a.learning_teachers||[]).length ? `
+      <h3 style="font-size:18px;margin:28px 0 12px">Сейчас проходят обучение (${a.learning_teachers.length})</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${a.learning_teachers.map(t => `<span class="teach-chip">${esc(t.name)}</span>`).join('')}
+      </div>` : ''}`;
+}
 
 // ===== Кабинет методиста =====
 let reviewTab = 'queue';
