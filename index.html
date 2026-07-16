@@ -190,6 +190,11 @@ button{font-family:inherit;cursor:pointer}
 .dos-hist-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--cream)}
 .dos-hist-row:last-child{border-bottom:none}
 .dos-note{background:#FBFAFF;border:1px solid var(--cream-dark);border-radius:10px;padding:12px 14px;margin-bottom:8px}
+.journal-form{background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;padding:18px 20px}
+.jf-row{display:flex;gap:10px;flex-wrap:wrap}
+.jf-input{flex:1;min-width:180px;padding:10px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:14px;background:#FDFCF8;font-family:inherit}
+.journal-list{display:flex;flex-direction:column;gap:8px}
+.journal-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:12px 16px}
 .rec-box{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px;margin-top:14px;border:2px solid var(--purple);border-radius:var(--radius);background:var(--purple-light);text-align:center}
 .rec-box.prep{border-color:var(--orange);background:var(--orange-light)}
 .rec-time{font-family:'Fredoka',sans-serif;font-size:40px;font-weight:600;color:var(--purple-dark);line-height:1}
@@ -535,7 +540,116 @@ function screenStub(title, text){
     <div class="note">Этот раздел скоро появится.</div>`;
 }
 async function openProgress(){ show('review'); document.getElementById('reviewBody').innerHTML = screenStub('📊 Прогресс', window.__isEditor?'Сводка прохождения по всем преподавателям.':'Ваш прогресс по курсам, дедлайны и что осталось.'); }
-async function openJournal(){ if(!window.__isEditor){go('');return;} show('review'); document.getElementById('reviewBody').innerHTML = screenStub('🗂 Журнал обучения', 'Назначение курсов преподавателям и история обучения.'); }
+async function openJournal(){
+  if(!window.__isEditor){go('');return;}
+  show('review');
+  const body = document.getElementById('reviewBody');
+  body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Загружаю журнал…</div>';
+  const [{ data: opts }, { data: journal }] = await Promise.all([
+    sb.rpc('learn_assignable'),
+    sb.rpc('learn_journal')
+  ]);
+  window.__assignOpts = opts || { teachers:[], courses:[] };
+  window.__journal = journal || [];
+  renderJournal();
+}
+
+function renderJournal(){
+  const body = document.getElementById('reviewBody');
+  const opts = window.__assignOpts;
+  const journal = window.__journal || [];
+  const fmt = s => s ? new Date(s).toLocaleDateString('ru-RU') : '—';
+
+  body.innerHTML = `
+    <h1 style="font-size:32px;margin-bottom:8px">🗂 Журнал обучения</h1>
+    <p style="color:var(--gray);margin-bottom:20px">Назначайте курсы преподавателям и следите за историей обучения.</p>
+
+    <div class="journal-form">
+      <div style="font-weight:800;font-size:15px;margin-bottom:12px">➕ Новое назначение</div>
+      <div class="jf-row">
+        <select id="jf-teacher" class="jf-input">
+          <option value="">Преподаватель…</option>
+          ${opts.teachers.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}
+        </select>
+        <select id="jf-course" class="jf-input" onchange="onJournalCourseChange()">
+          <option value="">Курс…</option>
+          ${opts.courses.map(c => `<option value="${c.slug}" data-dur="${c.duration_days||''}">${esc(c.title)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="jf-row" style="margin-top:10px">
+        <select id="jf-mode" class="jf-input" onchange="onJournalModeChange()">
+          <option value="cohort">Поток (общие дедлайны)</option>
+          <option value="individual">Индивидуально (свой срок)</option>
+        </select>
+        <input id="jf-start" type="date" class="jf-input" value="${new Date().toISOString().slice(0,10)}">
+      </div>
+      <div id="jf-hint" style="font-size:12.5px;color:var(--gray);margin-top:8px"></div>
+      <button class="btn" style="margin-top:12px" onclick="submitAssign()">Назначить и отправить письмо</button>
+    </div>
+
+    <h3 style="font-size:18px;margin:26px 0 12px">История назначений (${journal.length})</h3>
+    ${journal.length ? `<div class="journal-list">${journal.map(j => `
+      <div class="journal-row">
+        <div style="flex:1;min-width:180px">
+          <div style="font-weight:700">${esc(j.teacher)}</div>
+          <div style="font-size:13px;color:var(--gray)">${j.emoji||'📘'} ${esc(j.course)}</div>
+        </div>
+        <div style="font-size:12.5px;color:var(--gray);min-width:140px">
+          <div>${j.mode==='individual'?'👤 индивидуально':'👥 поток'}</div>
+          <div>старт ${fmt(j.started_at)}${j.deadline?` · до ${fmt(j.deadline)}`:''}</div>
+        </div>
+        <div style="min-width:100px;font-size:12.5px">
+          ${j.completed_at?'<span class="teach-chip ok">завершил</span>'
+            :j.suspended?'<span class="teach-chip bad">приостановлен</span>'
+            :`<span class="teach-chip">${j.done_lessons}/${j.total_lessons}</span>`}
+        </div>
+        <button onclick="unassign('${j.enrollment_id}')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12.5px">снять</button>
+      </div>`).join('')}</div>` : '<div class="note">Назначений пока нет.</div>'}`;
+  onJournalModeChange();
+}
+
+function onJournalCourseChange(){ onJournalModeChange(); }
+function onJournalModeChange(){
+  const mode = document.getElementById('jf-mode')?.value;
+  const courseSel = document.getElementById('jf-course');
+  const startInp = document.getElementById('jf-start');
+  const hint = document.getElementById('jf-hint');
+  if (!hint) return;
+  if (mode === 'individual') {
+    const dur = courseSel?.selectedOptions[0]?.dataset.dur;
+    if (!dur) {
+      hint.innerHTML = '⚠️ У выбранного курса не задано «дней на прохождение» — индивидуальный режим недоступен, задайте duration_days курса.';
+    } else {
+      const start = startInp?.value ? new Date(startInp.value) : new Date();
+      const dl = new Date(start.getTime() + dur*86400000);
+      hint.innerHTML = `Срок: <b>${dur} дней</b> → дедлайн <b>${dl.toLocaleDateString('ru-RU')}</b>.`;
+    }
+  } else {
+    hint.innerHTML = 'Дедлайны берутся общие из карты курса. Преподаватель идёт в потоке со всеми.';
+  }
+}
+
+async function submitAssign(){
+  const teacher = document.getElementById('jf-teacher').value;
+  const course = document.getElementById('jf-course').value;
+  const mode = document.getElementById('jf-mode').value;
+  const start = document.getElementById('jf-start').value;
+  if (!teacher || !course) { alert('Выберите преподавателя и курс.'); return; }
+  const { data, error } = await sb.rpc('learn_assign_course', {
+    p_teacher_id: teacher, p_course_slug: course, p_mode: mode,
+    p_start_date: start ? new Date(start).toISOString() : new Date().toISOString()
+  });
+  if (error) { alert(error.message); return; }
+  alert('Назначено! Преподавателю отправлено письмо.');
+  openJournal();
+}
+
+async function unassign(enrollmentId){
+  if (!confirm('Снять это назначение? Прогресс преподавателя по курсу будет удалён.')) return;
+  const { error } = await sb.rpc('learn_unassign_course', { p_enrollment_id: enrollmentId });
+  if (error) { alert(error.message); return; }
+  openJournal();
+}
 async function openCerts(){ show('review'); document.getElementById('reviewBody').innerHTML = screenStub('🏅 Сертификаты', window.__isEditor?'Выписка и учёт сертификатов.':'Ваши сертификаты за пройденные курсы.'); }
 async function openAnalytics(){ if(!window.__isEditor){go('');return;} show('review'); document.getElementById('reviewBody').innerHTML = screenStub('📈 Аналитика', 'Статистика по курсам и преподавателям.'); }
 
