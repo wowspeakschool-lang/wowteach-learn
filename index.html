@@ -2091,9 +2091,20 @@ async function runAudioParallel(blockId, task, mime, stage){
 
   // подготовка перед стартом (если задана)
   if (task.prepSec > 0) {
-    await countdown(stage, task.prepSec, '⏳ Подготовка', 'Задание 3',
+    await countdown(stage, task.prepSec, '⏳ Подготовка', 'Интервью',
       'Сейчас начнётся аудио с вопросами. Отвечайте после каждого — микрофон уже пишет.');
   }
+
+  // явная кнопка старта — гарантирует пользовательский жест для autoplay аудио
+  await new Promise((resolveStart) => {
+    stage.innerHTML = `
+      <div class="rec-box" style="align-items:center">
+        <div style="font-weight:800;font-size:15px;margin-bottom:6px">🎧 Готовы начать интервью?</div>
+        <div style="font-size:13px;color:var(--gray);margin-bottom:14px">Аудио с вопросами заиграет, микрофон начнёт запись. Отвечайте после каждого вопроса.</div>
+        <button class="btn" id="startInterview-${task.id}" style="font-size:16px;padding:13px 30px">▶ Начать интервью</button>
+      </div>`;
+    document.getElementById('startInterview-'+task.id).onclick = () => resolveStart();
+  });
 
   await new Promise((resolve) => {
     recChunks = [];
@@ -2130,10 +2141,12 @@ async function runAudioParallel(blockId, task, mime, stage){
     audio.addEventListener('timeupdate', () => {
       if (audio.currentTime > lastT + 0.5) audio.currentTime = lastT; else lastT = audio.currentTime;
     });
+    // старт аудио — теперь после клика, autoplay разрешён.
+    // если play() всё же упадёт — НЕ рушим запись: даём фиксированное время (по длине аудио или 6 мин)
     audio.play().catch(() => {
-      // если автоплей заблокирован — не страшно, запись идёт, ученик слышит после клика
-      clearInterval(recTimer);
-      try { mediaRec.stop(); } catch(_){}
+      // аудио не запустилось (редко) — запись продолжается, останавливаем по таймауту
+      const fallbackSec = Math.round(audio.duration || 360);
+      setTimeout(() => { clearInterval(recTimer); try { mediaRec.stop(); } catch(_){} }, fallbackSec*1000);
     });
   });
 
