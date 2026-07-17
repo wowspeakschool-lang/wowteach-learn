@@ -2274,8 +2274,8 @@ function renderLesson(slug, keepScroll){
   // любое редактирование в уроке помечает «есть несохранённое»
   body.addEventListener('input', markDirty);
   body.addEventListener('change', markDirty);
-  // запускаем таймер пробника, только если письменная не завершена
-  const writtenDone = !!(l.done_at || l.exam_reviewed);
+  // запускаем таймер пробника, только если письменная не завершена и это ученик
+  const writtenDone = window.__isEditor || !!(l.done_at || l.exam_reviewed);
   const examBlock = (l.blocks||[]).find(bl => bl.type === 'exam' && bl.exam_timer);
   if (examBlock && !writtenDone) initExamTimer(examBlock.id, examBlock.exam_timer);
   else if (examTimerInterval) { clearInterval(examTimerInterval); examTimerInterval = null; }
@@ -2805,8 +2805,10 @@ function renderExam(b){
   const secs = p.sections || [];
   const hasTimer = !!p.written_timer_sec;
   const started = !!timer;
+  const preview = !!window.__isEditor;   // методист — режим предпросмотра
 
-  if (hasTimer && !started) {
+  // экран «Начать тест» — только для ученика (не для предпросмотра)
+  if (hasTimer && !started && !preview) {
     return `<div class="block">
       <div class="exam-head">
         <h2 style="font-size:22px;margin-bottom:8px">📝 ${esc(p.title || 'Пробник')}</h2>
@@ -2826,12 +2828,13 @@ function renderExam(b){
     </div>`;
   }
 
-  // письменная часть завершена, если урок пройден или экзамен проверен
-  const writtenDone = !!(currentLesson && (currentLesson.done_at || currentLesson.exam_reviewed));
+  // письменная часть завершена, если урок пройден или экзамен проверен; для методиста — предпросмотр без таймера
+  const writtenDone = preview || !!(currentLesson && (currentLesson.done_at || currentLesson.exam_reviewed));
   const expired = timer && timer.expired && !writtenDone;
 
   return `<div class="block" id="exam-${b.id}" data-expired="${expired?1:0}" data-done="${writtenDone?1:0}">
     ${hasTimer && !writtenDone ? `<div class="exam-timer" id="exam-timer-${b.id}">⏱ <span id="tval-${b.id}">--:--</span></div>` : ''}
+    ${preview ? '<div class="note" style="margin-bottom:14px">👁 Режим предпросмотра — вы видите урок как методист. Ответы не сохраняются.</div>' : ''}
     <div id="exam-result-${b.id}"></div>
     <div class="exam-head">
       <h2 style="font-size:22px;margin-bottom:8px">📝 ${esc(p.title || 'Пробник')}</h2>
