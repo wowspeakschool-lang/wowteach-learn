@@ -296,15 +296,19 @@ button{font-family:inherit;cursor:pointer}
 .mtable .g{color:#15803D}.mtable .y{color:#B45309}.mtable .r{color:var(--red)}
 .mtable tfoot .mt-avg td{background:#FBFAF7;font-weight:700;border-top:2px solid var(--cream-dark)}
 .an-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-@media(max-width:720px){.an-charts{grid-template-columns:1fr}}
-.an-chart-box{background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;padding:16px 18px}
-.an-chart-title{font-size:13.5px;font-weight:800;margin-bottom:14px}
-.an-chart2{display:flex;gap:4px;align-items:flex-end;height:130px}
-.ch2-col{flex:1;display:flex;flex-direction:column;align-items:center;height:100%}
-.ch2-bars{flex:1;display:flex;align-items:flex-end;gap:2px;width:100%;justify-content:center}
-.ch2-bar{width:42%;min-height:2px;border-radius:3px 3px 0 0;transition:height .3s}
-.ch2-label{font-size:10px;color:var(--gray);margin-top:5px;text-transform:capitalize}
-.an-legend{display:flex;gap:12px;font-size:11.5px;color:var(--gray);margin-top:10px;flex-wrap:wrap}
+@media(max-width:820px){.an-charts{grid-template-columns:1fr}}
+.an-chart-box{background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;padding:20px 22px}
+.an-chart-title{font-size:15px;font-weight:800;margin-bottom:18px}
+.bigchart{display:flex;gap:6px;align-items:flex-end;height:220px;padding-bottom:4px}
+.bc-col{flex:1;display:flex;flex-direction:column;align-items:center;height:100%;cursor:pointer;border-radius:8px 8px 0 0;transition:background .15s;padding:0 2px}
+.bc-col:hover{background:var(--purple-light)}
+.bc-bars{flex:1;display:flex;align-items:flex-end;gap:3px;width:100%;justify-content:center;min-height:0}
+.bc-bar{width:40%;min-height:3px;border-radius:4px 4px 0 0;transition:height .3s}
+.bc-val{font-size:11.5px;font-weight:800;color:var(--ink);margin-top:6px}
+.bc-label{font-size:11px;color:var(--gray);margin-top:2px;text-transform:capitalize}
+.an-legend{display:flex;gap:14px;font-size:12px;color:var(--gray);margin-top:14px;flex-wrap:wrap}
+.an-legend i{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:middle;margin-right:4px}
+.chart-tip{position:fixed;z-index:300;background:#2D2D3F;color:#fff;border-radius:10px;padding:10px 14px;pointer-events:none;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:220px}
 .rec-box{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px;margin-top:14px;border:2px solid var(--purple);border-radius:var(--radius);background:var(--purple-light);text-align:center}
 .rec-box.prep{border-color:var(--orange);background:var(--orange-light)}
 .rec-time{font-family:'Fredoka',sans-serif;font-size:40px;font-weight:600;color:var(--purple-dark);line-height:1}
@@ -848,6 +852,24 @@ async function unassign(enrollmentId){
 async function openCerts(){ show('review'); document.getElementById('reviewBody').innerHTML = screenStub('🏅 Сертификаты', window.__isEditor?'Выписка и учёт сертификатов.':'Ваши сертификаты за пройденные курсы.'); }
 let analyticsCourse = null;   // null = вся школа, иначе slug
 let analyticsYear = null;     // null = текущий год
+function showChartTip(e, title, lines){
+  const tip = document.getElementById('chartTip');
+  if (!tip) return;
+  tip.innerHTML = `<div style="font-weight:800;margin-bottom:4px;text-transform:capitalize">${title}</div>${lines.map(l=>`<div style="font-size:12.5px">${l}</div>`).join('')}`;
+  tip.style.display = 'block';
+  const move = (ev) => {
+    tip.style.left = (ev.clientX + 14) + 'px';
+    tip.style.top = (ev.clientY + 14) + 'px';
+  };
+  move(e);
+  e.currentTarget.__moveHandler = move;
+  e.currentTarget.addEventListener('mousemove', move);
+}
+function hideChartTip(){
+  const tip = document.getElementById('chartTip');
+  if (tip) tip.style.display = 'none';
+}
+
 async function openMonthDetail(month){
   const { data, error } = await sb.rpc('learn_month_detail', { p_month: month, p_course_slug: analyticsCourse });
   if (error) { alert(error.message); return; }
@@ -1007,38 +1029,47 @@ function renderMonthlyAnalytics(d){
     <div class="an-charts">
       <div class="an-chart-box">
         <div class="an-chart-title">Охват обучением по месяцам</div>
-        <div class="an-chart2">
-          ${chrono.map(m => {
+        <div class="bigchart" id="chart-coverage">
+          ${chrono.map((m,i) => {
             const cov = m.teachers_eom ? Math.round(m.covered*100/m.teachers_eom) : 0;
-            return `<div class="ch2-col">
-              <div class="ch2-bars">
-                <div class="ch2-bar" style="height:${(m.teachers_eom||0)/maxCov*100}%;background:#E5E0F5" title="преподов: ${m.teachers_eom}"></div>
-                <div class="ch2-bar" style="height:${(m.covered||0)/maxCov*100}%;background:#7B61FF" title="охвачено: ${m.covered} (${cov}%)"></div>
+            const hT = (m.teachers_eom||0)/maxCov*100;
+            const hC = (m.covered||0)/maxCov*100;
+            return `<div class="bc-col"
+              onmouseenter="showChartTip(event, '${esc(m.label)}', ['Преподов всего: ${m.teachers_eom}','Охвачено: ${m.covered} (${cov}%)'])"
+              onmouseleave="hideChartTip()">
+              <div class="bc-bars">
+                <div class="bc-bar" style="height:${hT}%;background:#E5E0F5"></div>
+                <div class="bc-bar" style="height:${hC}%;background:#7B61FF"></div>
               </div>
-              <div class="ch2-label">${esc(m.label).slice(0,3)}</div>
+              <div class="bc-val">${cov}%</div>
+              <div class="bc-label">${esc(m.label).slice(0,3)}</div>
             </div>`;
           }).join('')}
         </div>
-        <div class="an-legend"><span>⬜ преподов всего</span><span>🟣 охвачено</span></div>
+        <div class="an-legend"><span><i style="background:#E5E0F5"></i> преподов всего</span><span><i style="background:#7B61FF"></i> охвачено</span></div>
       </div>
 
       <div class="an-chart-box">
         <div class="an-chart-title">Конверсия завершивших по месяцам</div>
-        <div class="an-chart2">
+        <div class="bigchart" id="chart-conversion">
           ${chrono.map(m => {
             const conv = m.assigned ? Math.round(m.completed*100/m.assigned) : 0;
             const col = conv>=70?'#22C55E':conv>=40?'#F59E0B':'#DC2626';
-            return `<div class="ch2-col">
-              <div class="ch2-bars">
-                <div class="ch2-bar" style="height:${conv}%;background:${col}" title="${conv}%"></div>
+            return `<div class="bc-col"
+              onmouseenter="showChartTip(event, '${esc(m.label)}', ['Назначено: ${m.assigned}','Завершили: ${m.completed}','Конверсия: ${conv}%'])"
+              onmouseleave="hideChartTip()">
+              <div class="bc-bars">
+                <div class="bc-bar" style="height:${conv}%;background:${col};width:60%"></div>
               </div>
-              <div class="ch2-label">${esc(m.label).slice(0,3)}</div>
+              <div class="bc-val" style="color:${col}">${conv}%</div>
+              <div class="bc-label">${esc(m.label).slice(0,3)}</div>
             </div>`;
           }).join('')}
         </div>
-        <div class="an-legend"><span>🟢 ≥70%</span><span>🟡 40–69%</span><span>🔴 &lt;40%</span></div>
+        <div class="an-legend"><span><i style="background:#22C55E"></i> ≥70%</span><span><i style="background:#F59E0B"></i> 40–69%</span><span><i style="background:#DC2626"></i> &lt;40%</span></div>
       </div>
-    </div>`;
+    </div>
+    <div id="chartTip" class="chart-tip" style="display:none"></div>`;
 }
 
 function exportMonthlyCSV(){
