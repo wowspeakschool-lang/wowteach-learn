@@ -950,8 +950,8 @@ function renderLessonBreakdown(det){
       <table class="mtable">
         <thead><tr><th>Урок</th><th>Прошли</th><th>Ср. балл</th><th>Ср. время</th></tr></thead>
         <tbody>
-          ${lessons.map(l => `<tr>
-            <td style="font-weight:700">${esc(l.title)}</td>
+          ${lessons.map(l => `<tr class="mt-clickable" onclick="openLessonDetail('${l.slug}')">
+            <td style="font-weight:700">${esc(l.title)} <span style="color:var(--purple);font-size:11px">▸</span></td>
             <td>${l.completed}</td>
             <td>${l.avg_score!=null?`<b>${l.avg_score}%</b>`:'—'}</td>
             <td>${l.avg_hours!=null?l.avg_hours+'ч':'—'}</td>
@@ -959,6 +959,84 @@ function renderLessonBreakdown(det){
         </tbody>
       </table>
     </div>`;
+}
+
+async function openLessonDetail(lessonSlug){
+  const { data: d, error } = await sb.rpc('learn_lesson_full_detail', { p_course_slug: analyticsCourse, p_lesson_slug: lessonSlug });
+  if (error) { alert(error.message); return; }
+  const s = d.summary_stats || {};
+  const done = d.completed_list || [];
+  const stuck = d.stuck_list || [];
+  const reviews = d.reviews || [];
+  const dist = d.score_dist || {};
+  const fmt = x => x ? new Date(x).toLocaleDateString('ru-RU') : '';
+  const stars = n => '★'.repeat(n)+'☆'.repeat(5-n);
+
+  // распределение баллов по диапазонам 0-20,20-40,...
+  const buckets = ['0–20%','20–40%','40–60%','60–80%','80–100%'];
+  const maxB = Math.max(1, ...Object.values(dist).map(Number));
+
+  const overlay = document.createElement('div');
+  overlay.className = 'cd-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="cd-modal" style="max-width:720px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px">
+      <div>
+        <h2 style="font-size:21px;margin:0">${esc(d.title)}</h2>
+        <div style="font-size:12.5px;color:var(--gray)">${d.emoji||'📘'} ${esc(d.course)}</div>
+      </div>
+      <button onclick="this.closest('.cd-overlay').remove()" style="background:none;border:none;font-size:24px;cursor:pointer;color:var(--gray)">×</button>
+    </div>
+
+    <div class="cd-stats" style="grid-template-columns:repeat(5,1fr)">
+      <div class="cd-stat"><div class="cd-num">${s.completed||0}</div><div class="cd-lbl">прошли</div></div>
+      <div class="cd-stat"><div class="cd-num">${s.stuck||0}</div><div class="cd-lbl">застряли</div></div>
+      <div class="cd-stat"><div class="cd-num">${s.avg_score!=null?s.avg_score+'%':'—'}</div><div class="cd-lbl">ср. балл</div></div>
+      <div class="cd-stat"><div class="cd-num">${s.avg_hours!=null?s.avg_hours+'ч':'—'}</div><div class="cd-lbl">ср. время</div></div>
+      <div class="cd-stat"><div class="cd-num">${s.avg_stars!=null?s.avg_stars:'—'}</div><div class="cd-lbl">ср. оценка</div></div>
+    </div>
+
+    ${d.has_exam && Object.keys(dist).length ? `
+      <h3 style="font-size:15px;margin:20px 0 8px">Распределение баллов</h3>
+      <div class="fb-dist">
+        ${[5,4,3,2,1].map(b => {
+          const cnt = Number(dist[b]||0);
+          return `<div class="fb-dist-row">
+            <span style="min-width:64px;font-size:12.5px">${buckets[b-1]}</span>
+            <div class="fb-dist-bar"><div style="width:${cnt/maxB*100}%;background:#7B61FF"></div></div>
+            <span style="min-width:24px;text-align:right;font-weight:700">${cnt}</span>
+          </div>`;
+        }).join('')}
+      </div>` : ''}
+
+    <h3 style="font-size:15px;margin:20px 0 8px">✅ Прошли (${done.length})</h3>
+    ${done.length ? `<div class="cd-lessons" style="margin-bottom:6px">
+      <div class="cd-lhead"><div style="flex:2">Преподаватель</div>${d.has_exam?'<div>Балл</div>':''}<div>Время</div><div>Дата</div></div>
+      ${done.map(t => `<div class="cd-lrow">
+        <div style="flex:2;font-weight:600">${esc(t.teacher)}</div>
+        ${d.has_exam?`<div>${t.score!=null?`<b>${t.score}%</b>`:'—'}</div>`:''}
+        <div>${t.hours!=null?t.hours+'ч':'—'}</div>
+        <div style="font-size:12px;color:var(--gray)">${fmt(t.date)}</div>
+      </div>`).join('')}
+    </div>` : '<div class="note">Пока никто не прошёл.</div>'}
+
+    ${stuck.length ? `<h3 style="font-size:15px;margin:20px 0 8px">⏳ Застряли (${stuck.length})</h3>
+      <div class="md-list">${stuck.map(t => `<div class="md-item">
+        <div><b>${esc(t.teacher)}</b></div>
+        <div style="font-size:12px;color:var(--gray)">начал ${fmt(t.started)}</div>
+      </div>`).join('')}</div>` : ''}
+
+    <h3 style="font-size:15px;margin:20px 0 8px">💬 Отзывы (${reviews.length})</h3>
+    ${reviews.length ? `<div class="fb-reviews">${reviews.map(r => `
+      <div class="fb-review">
+        <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <span style="color:#F59E0B">${stars(r.stars)}</span>
+          <span style="font-size:12px;color:var(--gray)">${esc(r.teacher||'—')} · ${fmt(r.date)}</span>
+        </div>
+        ${r.comment?`<div style="font-size:13.5px;margin-top:5px">${esc(r.comment)}</div>`:'<div style="font-size:12.5px;color:var(--gray);margin-top:3px;font-style:italic">без комментария</div>'}
+      </div>`).join('')}</div>` : '<div class="note">Отзывов пока нет.</div>'}
+  </div>`;
+  document.body.appendChild(overlay);
 }
 
 function renderMonthlyAnalytics(d){
@@ -3084,22 +3162,27 @@ async function submitTask(blockId){
   }
 }
 
+let __finishing = false;
 async function finishLesson(){
+  if (__finishing) return;   // защита от повторных кликов
+  __finishing = true;
   const { data, error } = await sb.rpc('learn_complete_lesson',
     { p_course_slug: currentCourse, p_lesson_slug: currentLesson.slug });
-  if (error) { alert('Не получилось: ' + error.message); return; }
+  if (error) { alert('Не получилось: ' + error.message); __finishing = false; return; }
   if (!data.ok) {
     document.getElementById('finishBox').innerHTML =
       `<div class="note warn">${esc(data.reason)}</div>
        <div style="margin-top:12px"><button class="btn btn-green" onclick="finishLesson()">Проверить ещё раз</button></div>`;
+    __finishing = false;
     return;
   }
-  // мини-опрос по уроку (звёзды обязательно, текст опц.), потом переход
+  // мини-опрос (модалка показывается один раз)
   showLessonFeedback(currentCourse, currentLesson.slug, data.course_done);
 }
 
 let fbStars = 0;
 function showLessonFeedback(courseSlug, lessonSlug, courseDone){
+  if (document.getElementById('fbOverlay')) return;   // модалка уже открыта
   const overlay = document.createElement('div');
   overlay.className = 'cd-overlay';
   overlay.id = 'fbOverlay';
@@ -3129,14 +3212,19 @@ function setFbStars(n){
   });
 }
 
+let __submittingFb = false;
 async function submitLessonFeedback(courseSlug, lessonSlug, courseDone){
+  if (__submittingFb) return;
   if (!fbStars) { alert('Пожалуйста, поставьте оценку от 1 до 5 звёзд.'); return; }
+  __submittingFb = true;
   const comment = document.getElementById('fbComment').value.trim() || null;
   try { await sb.rpc('learn_submit_feedback', {
     p_course_slug: courseSlug, p_lesson_slug: lessonSlug, p_stars: fbStars, p_comment: comment
   }); } catch(_){}
   const ov = document.getElementById('fbOverlay');
   if (ov) ov.remove();
+  __submittingFb = false;
+  __finishing = false;
   if (courseDone) alert('🎉 Курс пройден!');
   await openCourse(courseSlug);
 }
