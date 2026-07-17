@@ -1034,13 +1034,18 @@ function renderAnalytics(a){
     <p style="color:var(--gray);margin-bottom:16px">Воронка, динамика и конверсия обучения.</p>
     ${periodSelector(analyticsPeriod, 'openAnalytics')}
 
-    <div class="an-grid">
+    <div style="font-size:12.5px;font-weight:800;color:var(--gray);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Сейчас</div>
+    <div class="an-grid" style="margin-bottom:18px">
       ${stat(s.teachers_total||0, 'Всего преподавателей', '#7B61FF')}
       ${stat(s.learning_now||0, 'Учатся сейчас', '#0EA5E9')}
-      ${stat(s.completed_month||0, `Завершили в ${monthName}`, '#22C55E')}
-      ${stat(s.completed_year||0, `Завершили в ${year}`, '#22C55E')}
-      ${stat(s.suspended_now||0, 'Приостановлены', '#DC2626')}
       ${stat(s.pending_reviews||0, 'Работ на проверке', '#FF8C42')}
+    </div>
+
+    <div style="font-size:12.5px;font-weight:800;color:var(--gray);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">За период: ${PERIOD_LABELS[analyticsPeriod]}</div>
+    <div class="an-grid">
+      ${stat(s.assigned_period||0, 'Назначено', '#7B61FF')}
+      ${stat(s.completed_period||0, 'Завершили', '#22C55E')}
+      ${stat(s.suspended_period||0, 'Приостановлено', '#DC2626')}
     </div>
 
     <h3 style="font-size:18px;margin:28px 0 12px">🔽 Воронка по курсам <span style="font-size:12.5px;font-weight:400;color:var(--gray)">— клик для детализации</span></h3>
@@ -1174,7 +1179,7 @@ function renderReviewContent(){
         <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center">
           <div>
             <div style="font-weight:800;font-size:16px">${esc(w.student||'—')}</div>
-            <div style="font-size:12.5px;color:var(--gray)">${esc(w.course||'')} · ${esc(w.lesson||'')} · ${w.count} ${w.count===1?'задание':'заданий'} на проверку</div>
+            <div style="font-size:12.5px;color:var(--gray)">${esc(w.course||'')} · ${esc(w.lesson||'')} · ${w.count} ${plural(w.count,'задание','задания','заданий')} на проверку</div>
           </div>
           <button class="btn" style="padding:10px 22px" onclick="openFullWork('${enr}','${w.block_id||w.id}')">Открыть работу целиком →</button>
         </div>
@@ -2782,6 +2787,12 @@ async function refreshLesson(){
 }
 
 function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function plural(n, one, few, many){
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+  return many;
+}
 </script>
 </body>
 </html>
