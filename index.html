@@ -269,6 +269,9 @@ button{font-family:inherit;cursor:pointer}
 .fb-filter.on{border-color:#F59E0B;background:#FEF3E2;color:#C2410C}
 .fb-reviews{display:flex;flex-direction:column;gap:10px;max-height:340px;overflow-y:auto}
 .fb-review{background:#FBFAF7;border:1px solid var(--cream-dark);border-radius:10px;padding:12px 14px}
+.period-sel{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px}
+.period-btn{border:1.5px solid var(--cream-dark);background:#fff;border-radius:999px;padding:7px 15px;font-size:13px;font-weight:700;color:var(--gray);cursor:pointer}
+.period-btn.on{border-color:var(--purple);background:var(--purple-light);color:var(--purple-dark)}
 .rec-box{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px;margin-top:14px;border:2px solid var(--purple);border-radius:var(--radius);background:var(--purple-light);text-align:center}
 .rec-box.prep{border-color:var(--orange);background:var(--orange-light)}
 .rec-time{font-family:'Fredoka',sans-serif;font-size:40px;font-weight:600;color:var(--purple-dark);line-height:1}
@@ -689,14 +692,16 @@ function renderProgressOverview(rows){
     </div>`;
 }
 
-async function openJournal(){
+let journalPeriod = 'all';
+async function openJournal(period){
   if(!window.__isEditor){go('');return;}
+  if (period) journalPeriod = period;
   show('review');
   const body = document.getElementById('reviewBody');
   body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Загружаю журнал…</div>';
   const [{ data: opts }, { data: journal }] = await Promise.all([
     sb.rpc('learn_assignable'),
-    sb.rpc('learn_journal')
+    sb.rpc('learn_journal', { p_period: journalPeriod })
   ]);
   window.__assignOpts = opts || { teachers:[], courses:[] };
   window.__journal = journal || [];
@@ -737,6 +742,7 @@ function renderJournal(){
     </div>
 
     <h3 style="font-size:18px;margin:26px 0 12px">История назначений (${journal.length})</h3>
+    ${periodSelector(journalPeriod, 'openJournal')}
     <input id="jrn-search" placeholder="🔍 Поиск по преподавателю или курсу…" value="${esc(window.__journalSearch||'')}"
       oninput="window.__journalSearch=this.value;renderJournal();document.getElementById('jrn-search').focus()"
       style="width:100%;padding:10px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:14px;background:#fff;margin-bottom:12px">
@@ -807,24 +813,37 @@ async function unassign(enrollmentId){
   openJournal();
 }
 async function openCerts(){ show('review'); document.getElementById('reviewBody').innerHTML = screenStub('🏅 Сертификаты', window.__isEditor?'Выписка и учёт сертификатов.':'Ваши сертификаты за пройденные курсы.'); }
-async function openAnalytics(){
+let analyticsPeriod = 'all';
+async function openAnalytics(period){
   if(!window.__isEditor){go('');return;}
+  if (period) analyticsPeriod = period;
   show('review');
   const body = document.getElementById('reviewBody');
   body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Считаю статистику…</div>';
-  const { data, error } = await sb.rpc('learn_analytics');
+  const { data, error } = await sb.rpc('learn_analytics', { p_period: analyticsPeriod });
   if (error) { body.innerHTML = '<div class="note warn">'+esc(error.message)+'</div>'; return; }
   renderAnalytics(data);
 }
 
+// ===== Фильтр по времени (общий) =====
+const PERIOD_LABELS = { month:'Этот месяц', prev_month:'Прошлый месяц', '3months':'3 месяца', year:'Год', all:'Всё время' };
+function periodSelector(current, onchangeFn){
+  return `<div class="period-sel">
+    ${Object.entries(PERIOD_LABELS).map(([k,label]) =>
+      `<button class="period-btn ${current===k?'on':''}" onclick="${onchangeFn}('${k}')">${label}</button>`).join('')}
+  </div>`;
+}
+
 // ===== Отзывы (вкладка «Отзывы») =====
 let feedbackFilter = '';
-async function openFeedback(){
+let feedbackPeriod = 'all';
+async function openFeedback(period){
   if(!window.__isEditor){go('');return;}
+  if (period) feedbackPeriod = period;
   show('review');
   const body = document.getElementById('reviewBody');
   body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Загружаю отзывы…</div>';
-  const { data, error } = await sb.rpc('learn_feedback_overview');
+  const { data, error } = await sb.rpc('learn_feedback_overview', { p_period: feedbackPeriod });
   if (error) { body.innerHTML = '<div class="note warn">'+esc(error.message)+'</div>'; return; }
   renderFeedback(data);
 }
@@ -845,7 +864,8 @@ function renderFeedback(d){
 
   body.innerHTML = `
     <h1 style="font-size:32px;margin-bottom:8px">💬 Отзывы</h1>
-    <p style="color:var(--gray);margin-bottom:20px">Оценки уроков от преподавателей — уровень «Реакция».</p>
+    <p style="color:var(--gray);margin-bottom:16px">Оценки уроков от преподавателей — уровень «Реакция».</p>
+    ${periodSelector(feedbackPeriod, 'openFeedback')}
 
     <div class="an-grid" style="margin-bottom:24px">
       <div class="an-stat" style="border-top:3px solid #F59E0B"><div class="an-num">${sum.avg_stars||'—'}</div><div class="an-label">Средняя оценка</div></div>
@@ -1011,7 +1031,8 @@ function renderAnalytics(a){
 
   body.innerHTML = `
     <h1 style="font-size:32px;margin-bottom:8px">📈 Аналитика</h1>
-    <p style="color:var(--gray);margin-bottom:20px">Воронка, динамика и конверсия обучения.</p>
+    <p style="color:var(--gray);margin-bottom:16px">Воронка, динамика и конверсия обучения.</p>
+    ${periodSelector(analyticsPeriod, 'openAnalytics')}
 
     <div class="an-grid">
       ${stat(s.teachers_total||0, 'Всего преподавателей', '#7B61FF')}
