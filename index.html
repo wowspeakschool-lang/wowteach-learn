@@ -920,6 +920,11 @@ async function openAnalytics(courseSlug, year){
   const { data, error } = await sb.rpc('learn_analytics_monthly', { p_course_slug: analyticsCourse, p_year: analyticsYear });
   if (error) { body.innerHTML = '<div class="note warn">'+esc(error.message)+'</div>'; return; }
   analyticsYear = data.year;
+  // если выбран конкретный курс — подгружаем разбивку по урокам
+  if (analyticsCourse) {
+    const { data: detail } = await sb.rpc('learn_course_detail', { p_course_slug: analyticsCourse });
+    data.lesson_detail = detail;
+  }
   renderMonthlyAnalytics(data);
 }
 
@@ -927,6 +932,33 @@ function avgOf(rows, key){
   const vals = rows.map(r => r[key]).filter(v => v != null);
   if (!vals.length) return null;
   return Math.round(vals.reduce((a,b)=>a+Number(b),0) / vals.length);
+}
+
+function renderLessonBreakdown(det){
+  const s = det.summary || {};
+  const lessons = det.lessons || [];
+  if (!lessons.length) return '';
+  return `
+    <div class="an-section-title" style="margin:28px 0 10px">Разбор по урокам</div>
+    <div class="cd-stats" style="margin-bottom:14px">
+      <div class="cd-stat"><div class="cd-num">${s.assigned||0}</div><div class="cd-lbl">назначено</div></div>
+      <div class="cd-stat"><div class="cd-num">${s.completed||0}</div><div class="cd-lbl">завершили</div></div>
+      <div class="cd-stat"><div class="cd-num">${s.avg_score!=null?s.avg_score+'%':'—'}</div><div class="cd-lbl">средний балл</div></div>
+      <div class="cd-stat"><div class="cd-num">${s.avg_course_hours!=null?s.avg_course_hours+'ч':'—'}</div><div class="cd-lbl">среднее время</div></div>
+    </div>
+    <div class="mtable-wrap">
+      <table class="mtable">
+        <thead><tr><th>Урок</th><th>Прошли</th><th>Ср. балл</th><th>Ср. время</th></tr></thead>
+        <tbody>
+          ${lessons.map(l => `<tr>
+            <td style="font-weight:700">${esc(l.title)}</td>
+            <td>${l.completed}</td>
+            <td>${l.avg_score!=null?`<b>${l.avg_score}%</b>`:'—'}</td>
+            <td>${l.avg_hours!=null?l.avg_hours+'ч':'—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
 }
 
 function renderMonthlyAnalytics(d){
@@ -1069,7 +1101,8 @@ function renderMonthlyAnalytics(d){
         <div class="an-legend"><span><i style="background:#22C55E"></i> ≥70%</span><span><i style="background:#F59E0B"></i> 40–69%</span><span><i style="background:#DC2626"></i> &lt;40%</span></div>
       </div>
     </div>
-    <div id="chartTip" class="chart-tip" style="display:none"></div>`;
+    <div id="chartTip" class="chart-tip" style="display:none"></div>
+    ${d.lesson_detail ? renderLessonBreakdown(d.lesson_detail) : ''}`;
 }
 
 function exportMonthlyCSV(){
