@@ -272,9 +272,14 @@ button{font-family:inherit;cursor:pointer}
 .period-sel{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px}
 .period-btn{border:1.5px solid var(--cream-dark);background:#fff;border-radius:999px;padding:7px 15px;font-size:13px;font-weight:700;color:var(--gray);cursor:pointer}
 .period-btn.on{border-color:var(--purple);background:var(--purple-light);color:var(--purple-dark)}
-.an-course-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
-.an-ctab{border:1.5px solid var(--cream-dark);background:#fff;border-radius:999px;padding:8px 16px;font-size:13.5px;font-weight:700;color:var(--gray);cursor:pointer}
-.an-ctab.on{border-color:var(--purple);background:var(--purple);color:#fff}
+.an-course-picker{position:relative;margin-bottom:20px;max-width:420px}
+.an-picker-btn{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;border:1.5px solid var(--cream-dark);background:#fff;border-radius:12px;padding:12px 16px;font-size:14px;font-weight:700;color:var(--ink);cursor:pointer;font-family:inherit}
+.an-picker-btn:hover{border-color:var(--purple)}
+.an-picker-menu{position:absolute;top:calc(100% + 6px);left:0;right:0;background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.15);z-index:50;padding:8px;max-height:340px;overflow-y:auto}
+.an-picker-search{width:100%;padding:9px 12px;border:2px solid var(--cream-dark);border-radius:9px;font-size:13.5px;background:#FDFCF8;font-family:inherit;margin-bottom:6px}
+.an-picker-item{padding:10px 12px;border-radius:8px;font-size:13.5px;cursor:pointer}
+.an-picker-item:hover{background:var(--cream)}
+.an-picker-item.on{background:var(--purple-light);color:var(--purple-dark);font-weight:700}
 .an-section-title{font-size:13px;font-weight:800;color:var(--gray);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
 .mtable-wrap{overflow-x:auto;background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;margin-bottom:24px}
 .mtable{width:100%;border-collapse:collapse;font-size:13.5px;min-width:640px}
@@ -283,6 +288,11 @@ button{font-family:inherit;cursor:pointer}
 .mtable td{padding:11px 10px;text-align:center;border-top:1px solid var(--cream)}
 .mtable td:first-child{text-align:left}
 .mtable tbody tr:hover{background:#FBFAFF}
+.mt-clickable{cursor:pointer}
+.mt-clickable:hover{background:var(--purple-light)!important}
+.an-year-sel{border:1.5px solid var(--cream-dark);background:#fff;border-radius:12px;padding:12px 16px;font-size:14px;font-weight:700;color:var(--ink);cursor:pointer;font-family:inherit}
+.md-list{display:flex;flex-direction:column;gap:6px;margin-bottom:6px}
+.md-item{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:#FBFAF7;border:1px solid var(--cream-dark);border-radius:9px;padding:9px 13px;font-size:13.5px}
 .mtable .g{color:#15803D}.mtable .y{color:#B45309}.mtable .r{color:var(--red)}
 .mtable tfoot .mt-avg td{background:#FBFAF7;font-weight:700;border-top:2px solid var(--cream-dark)}
 .an-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
@@ -837,14 +847,57 @@ async function unassign(enrollmentId){
 }
 async function openCerts(){ show('review'); document.getElementById('reviewBody').innerHTML = screenStub('🏅 Сертификаты', window.__isEditor?'Выписка и учёт сертификатов.':'Ваши сертификаты за пройденные курсы.'); }
 let analyticsCourse = null;   // null = вся школа, иначе slug
-async function openAnalytics(courseSlug){
+let analyticsYear = null;     // null = текущий год
+async function openMonthDetail(month){
+  const { data, error } = await sb.rpc('learn_month_detail', { p_month: month, p_course_slug: analyticsCourse });
+  if (error) { alert(error.message); return; }
+  const assigned = data.assigned || [];
+  const completed = data.completed || [];
+  const byCourse = data.by_course;
+  const fmt = s => s ? new Date(s).toLocaleDateString('ru-RU') : '';
+
+  const overlay = document.createElement('div');
+  overlay.className = 'cd-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div class="cd-modal">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:18px">
+      <h2 style="font-size:22px;margin:0;text-transform:capitalize">${esc(data.label)}</h2>
+      <button onclick="this.closest('.cd-overlay').remove()" style="background:none;border:none;font-size:24px;cursor:pointer;color:var(--gray)">×</button>
+    </div>
+
+    ${byCourse ? `<h3 style="font-size:15px;margin:0 0 8px">По обучениям</h3>
+      <div class="cd-lessons" style="margin-bottom:18px">
+        <div class="cd-lhead"><div style="flex:2">Обучение</div><div>Назначено</div><div>Завершили</div></div>
+        ${byCourse.map(c => `<div class="cd-lrow"><div style="flex:2;font-weight:600">${c.emoji||'📘'} ${esc(c.course)}</div><div>${c.assigned}</div><div>${c.completed}</div></div>`).join('')}
+      </div>` : ''}
+
+    <h3 style="font-size:15px;margin:16px 0 8px">✅ Завершили (${completed.length})</h3>
+    ${completed.length ? `<div class="md-list">${completed.map(c => `
+      <div class="md-item">
+        <div><b>${esc(c.teacher)}</b> <span style="color:var(--gray);font-size:12.5px">· ${c.emoji||''} ${esc(c.course)}</span></div>
+        <div style="font-size:12.5px;color:var(--gray)">${c.score!=null?`балл ${c.score}%`:''} ${fmt(c.date)}</div>
+      </div>`).join('')}</div>` : '<div class="note" style="margin-bottom:14px">Никто не завершил в этом месяце.</div>'}
+
+    <h3 style="font-size:15px;margin:18px 0 8px">📋 Назначено (${assigned.length})</h3>
+    ${assigned.length ? `<div class="md-list">${assigned.map(a => `
+      <div class="md-item">
+        <div><b>${esc(a.teacher)}</b> <span style="color:var(--gray);font-size:12.5px">· ${a.emoji||''} ${esc(a.course)}</span></div>
+        <div style="font-size:12.5px;color:var(--gray)">${a.mode==='individual'?'👤':'👥'} ${fmt(a.date)}</div>
+      </div>`).join('')}</div>` : '<div class="note">Назначений не было.</div>'}
+  </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function openAnalytics(courseSlug, year){
   if(!window.__isEditor){go('');return;}
   if (courseSlug !== undefined) analyticsCourse = courseSlug;
+  if (year !== undefined) analyticsYear = year;
   show('review');
   const body = document.getElementById('reviewBody');
   body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Считаю статистику…</div>';
-  const { data, error } = await sb.rpc('learn_analytics_monthly', { p_course_slug: analyticsCourse, p_months: 12 });
+  const { data, error } = await sb.rpc('learn_analytics_monthly', { p_course_slug: analyticsCourse, p_year: analyticsYear });
   if (error) { body.innerHTML = '<div class="note warn">'+esc(error.message)+'</div>'; return; }
+  analyticsYear = data.year;
   renderMonthlyAnalytics(data);
 }
 
@@ -858,6 +911,7 @@ function renderMonthlyAnalytics(d){
   const body = document.getElementById('reviewBody');
   const months = d.months || [];
   const courses = d.courses || [];
+  window.__monthlyData = d;
 
   // средние за 3 и 12 месяцев (по строкам с данными)
   const last3 = months.slice(0, 3);
@@ -874,12 +928,29 @@ function renderMonthlyAnalytics(d){
     <h1 style="font-size:32px;margin-bottom:8px">📈 Аналитика</h1>
     <p style="color:var(--gray);margin-bottom:16px">Динамика обучения по месяцам: охват, конверсия, качество.</p>
 
-    <div class="an-course-tabs">
-      <button class="an-ctab ${!analyticsCourse?'on':''}" onclick="openAnalytics(null)">🏫 Вся школа</button>
-      ${courses.map(c => `<button class="an-ctab ${analyticsCourse===c.slug?'on':''}" onclick="openAnalytics('${c.slug}')">${c.emoji||'📘'} ${esc(c.title)}</button>`).join('')}
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;align-items:center">
+      <div class="an-course-picker" style="margin:0;flex:1;min-width:240px">
+        <button class="an-picker-btn" onclick="toggleCoursePicker(event)">
+          <span>${analyticsCourse ? (courses.find(c=>c.slug===analyticsCourse)?.emoji||'📘')+' '+esc(courseName) : '🏫 Вся школа'}</span>
+          <span style="color:var(--gray)">▾</span>
+        </button>
+        <div class="an-picker-menu" id="coursePickerMenu" style="display:none">
+          <input type="text" class="an-picker-search" id="coursePickerSearch" placeholder="🔍 Поиск обучения…" oninput="filterCoursePicker(this.value)" onclick="event.stopPropagation()">
+          <div class="an-picker-list" id="coursePickerList">
+            <div class="an-picker-item ${!analyticsCourse?'on':''}" data-name="вся школа" onclick="pickCourse(null)">🏫 Вся школа</div>
+            ${courses.map(c => `<div class="an-picker-item ${analyticsCourse===c.slug?'on':''}" data-name="${esc((c.title||'').toLowerCase())}" onclick="pickCourse('${c.slug}')">${c.emoji||'📘'} ${esc(c.title)}</div>`).join('')}
+          </div>
+        </div>
+      </div>
+      <select class="an-year-sel" onchange="openAnalytics(undefined, parseInt(this.value))">
+        ${(d.years||[]).map(y => `<option value="${y}" ${y===d.year?'selected':''}>${y}</option>`).join('')}
+      </select>
     </div>
 
-    <div class="an-section-title">${esc(courseName)} — по месяцам</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <div class="an-section-title" style="margin:0">${esc(courseName)} — по месяцам</div>
+      <button class="btn btn-ghost" style="padding:7px 16px;font-size:13px" onclick="exportMonthlyCSV()">⬇ Выгрузить в CSV</button>
+    </div>
     <div class="mtable-wrap">
       <table class="mtable">
         <thead>
@@ -899,8 +970,8 @@ function renderMonthlyAnalytics(d){
           ${months.map(m => {
             const cov = m.teachers_eom ? Math.round(m.covered*100/m.teachers_eom) : 0;
             const conv = m.assigned ? Math.round(m.completed*100/m.assigned) : null;
-            return `<tr>
-              <td style="font-weight:700;text-transform:capitalize">${esc(m.label)}</td>
+            return `<tr class="mt-clickable" onclick="openMonthDetail('${m.month}')">
+              <td style="font-weight:700;text-transform:capitalize">${esc(m.label)} <span style="color:var(--purple);font-size:11px">▸</span></td>
               <td>${m.teachers_eom}</td>
               <td>${m.covered}</td>
               <td><b>${cov}%</b></td>
@@ -968,6 +1039,57 @@ function renderMonthlyAnalytics(d){
         <div class="an-legend"><span>🟢 ≥70%</span><span>🟡 40–69%</span><span>🔴 &lt;40%</span></div>
       </div>
     </div>`;
+}
+
+function exportMonthlyCSV(){
+  const d = window.__monthlyData;
+  if (!d) return;
+  const months = d.months || [];
+  const courseName = analyticsCourse ? (d.courses.find(c=>c.slug===analyticsCourse)?.title || analyticsCourse) : 'Вся школа';
+  const headers = ['Месяц','Преподавателей','Охвачено','% охвата','Назначено','Завершили','Конверсия %','Средний балл %','Средняя длительность, дней'];
+  const rows = months.map(m => {
+    const cov = m.teachers_eom ? Math.round(m.covered*100/m.teachers_eom) : 0;
+    const conv = m.assigned ? Math.round(m.completed*100/m.assigned) : '';
+    return [m.label, m.teachers_eom, m.covered, cov, m.assigned, m.completed, conv, m.avg_score??'', m.avg_days??''];
+  });
+  // BOM для корректной кириллицы в Excel
+  const csv = '\uFEFF' + [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(';')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Аналитика — ${courseName} — ${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function toggleCoursePicker(e){
+  e.stopPropagation();
+  const menu = document.getElementById('coursePickerMenu');
+  const open = menu.style.display === 'block';
+  menu.style.display = open ? 'none' : 'block';
+  if (!open) {
+    setTimeout(() => document.getElementById('coursePickerSearch')?.focus(), 50);
+    document.addEventListener('click', closeCoursePicker);
+  }
+}
+function closeCoursePicker(e){
+  const picker = document.querySelector('.an-course-picker');
+  if (picker && !picker.contains(e.target)) {
+    const menu = document.getElementById('coursePickerMenu');
+    if (menu) menu.style.display = 'none';
+    document.removeEventListener('click', closeCoursePicker);
+  }
+}
+function filterCoursePicker(q){
+  const ql = q.trim().toLowerCase();
+  document.querySelectorAll('#coursePickerList .an-picker-item').forEach(it => {
+    it.style.display = it.dataset.name.includes(ql) ? 'block' : 'none';
+  });
+}
+function pickCourse(slug){
+  document.removeEventListener('click', closeCoursePicker);
+  openAnalytics(slug);
 }
 
 function avgPct(rows, num, den){
