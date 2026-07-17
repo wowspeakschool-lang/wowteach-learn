@@ -2274,9 +2274,10 @@ function renderLesson(slug, keepScroll){
   // любое редактирование в уроке помечает «есть несохранённое»
   body.addEventListener('input', markDirty);
   body.addEventListener('change', markDirty);
-  // запускаем таймер пробника, если он активен
+  // запускаем таймер пробника, только если письменная не завершена
+  const writtenDone = !!(l.done_at || l.exam_reviewed);
   const examBlock = (l.blocks||[]).find(bl => bl.type === 'exam' && bl.exam_timer);
-  if (examBlock) initExamTimer(examBlock.id, examBlock.exam_timer);
+  if (examBlock && !writtenDone) initExamTimer(examBlock.id, examBlock.exam_timer);
   else if (examTimerInterval) { clearInterval(examTimerInterval); examTimerInterval = null; }
   // подгружаем плееры записей устной части
   loadSpeakingPlayers(l);
@@ -2825,10 +2826,12 @@ function renderExam(b){
     </div>`;
   }
 
-  const expired = timer && timer.expired;
+  // письменная часть завершена, если урок пройден или экзамен проверен
+  const writtenDone = !!(currentLesson && (currentLesson.done_at || currentLesson.exam_reviewed));
+  const expired = timer && timer.expired && !writtenDone;
 
-  return `<div class="block" id="exam-${b.id}" data-expired="${expired?1:0}">
-    ${hasTimer ? `<div class="exam-timer" id="exam-timer-${b.id}">⏱ <span id="tval-${b.id}">--:--</span></div>` : ''}
+  return `<div class="block" id="exam-${b.id}" data-expired="${expired?1:0}" data-done="${writtenDone?1:0}">
+    ${hasTimer && !writtenDone ? `<div class="exam-timer" id="exam-timer-${b.id}">⏱ <span id="tval-${b.id}">--:--</span></div>` : ''}
     <div id="exam-result-${b.id}"></div>
     <div class="exam-head">
       <h2 style="font-size:22px;margin-bottom:8px">📝 ${esc(p.title || 'Пробник')}</h2>
