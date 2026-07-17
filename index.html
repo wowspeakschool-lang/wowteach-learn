@@ -272,6 +272,29 @@ button{font-family:inherit;cursor:pointer}
 .period-sel{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px}
 .period-btn{border:1.5px solid var(--cream-dark);background:#fff;border-radius:999px;padding:7px 15px;font-size:13px;font-weight:700;color:var(--gray);cursor:pointer}
 .period-btn.on{border-color:var(--purple);background:var(--purple-light);color:var(--purple-dark)}
+.an-course-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+.an-ctab{border:1.5px solid var(--cream-dark);background:#fff;border-radius:999px;padding:8px 16px;font-size:13.5px;font-weight:700;color:var(--gray);cursor:pointer}
+.an-ctab.on{border-color:var(--purple);background:var(--purple);color:#fff}
+.an-section-title{font-size:13px;font-weight:800;color:var(--gray);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+.mtable-wrap{overflow-x:auto;background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;margin-bottom:24px}
+.mtable{width:100%;border-collapse:collapse;font-size:13.5px;min-width:640px}
+.mtable th{background:var(--purple-light);color:var(--purple-dark);font-weight:800;font-size:11.5px;padding:11px 10px;text-align:center;white-space:nowrap}
+.mtable th:first-child{text-align:left}
+.mtable td{padding:11px 10px;text-align:center;border-top:1px solid var(--cream)}
+.mtable td:first-child{text-align:left}
+.mtable tbody tr:hover{background:#FBFAFF}
+.mtable .g{color:#15803D}.mtable .y{color:#B45309}.mtable .r{color:var(--red)}
+.mtable tfoot .mt-avg td{background:#FBFAF7;font-weight:700;border-top:2px solid var(--cream-dark)}
+.an-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:720px){.an-charts{grid-template-columns:1fr}}
+.an-chart-box{background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;padding:16px 18px}
+.an-chart-title{font-size:13.5px;font-weight:800;margin-bottom:14px}
+.an-chart2{display:flex;gap:4px;align-items:flex-end;height:130px}
+.ch2-col{flex:1;display:flex;flex-direction:column;align-items:center;height:100%}
+.ch2-bars{flex:1;display:flex;align-items:flex-end;gap:2px;width:100%;justify-content:center}
+.ch2-bar{width:42%;min-height:2px;border-radius:3px 3px 0 0;transition:height .3s}
+.ch2-label{font-size:10px;color:var(--gray);margin-top:5px;text-transform:capitalize}
+.an-legend{display:flex;gap:12px;font-size:11.5px;color:var(--gray);margin-top:10px;flex-wrap:wrap}
 .rec-box{display:flex;flex-direction:column;align-items:center;gap:12px;padding:24px;margin-top:14px;border:2px solid var(--purple);border-radius:var(--radius);background:var(--purple-light);text-align:center}
 .rec-box.prep{border-color:var(--orange);background:var(--orange-light)}
 .rec-time{font-family:'Fredoka',sans-serif;font-size:40px;font-weight:600;color:var(--purple-dark);line-height:1}
@@ -813,16 +836,158 @@ async function unassign(enrollmentId){
   openJournal();
 }
 async function openCerts(){ show('review'); document.getElementById('reviewBody').innerHTML = screenStub('🏅 Сертификаты', window.__isEditor?'Выписка и учёт сертификатов.':'Ваши сертификаты за пройденные курсы.'); }
-let analyticsPeriod = 'all';
-async function openAnalytics(period){
+let analyticsCourse = null;   // null = вся школа, иначе slug
+async function openAnalytics(courseSlug){
   if(!window.__isEditor){go('');return;}
-  if (period) analyticsPeriod = period;
+  if (courseSlug !== undefined) analyticsCourse = courseSlug;
   show('review');
   const body = document.getElementById('reviewBody');
   body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Считаю статистику…</div>';
-  const { data, error } = await sb.rpc('learn_analytics', { p_period: analyticsPeriod });
+  const { data, error } = await sb.rpc('learn_analytics_monthly', { p_course_slug: analyticsCourse, p_months: 12 });
   if (error) { body.innerHTML = '<div class="note warn">'+esc(error.message)+'</div>'; return; }
-  renderAnalytics(data);
+  renderMonthlyAnalytics(data);
+}
+
+function avgOf(rows, key){
+  const vals = rows.map(r => r[key]).filter(v => v != null);
+  if (!vals.length) return null;
+  return Math.round(vals.reduce((a,b)=>a+Number(b),0) / vals.length);
+}
+
+function renderMonthlyAnalytics(d){
+  const body = document.getElementById('reviewBody');
+  const months = d.months || [];
+  const courses = d.courses || [];
+
+  // средние за 3 и 12 месяцев (по строкам с данными)
+  const last3 = months.slice(0, 3);
+  const avg3 = { coverage: avgPct(last3,'covered','teachers_eom'), conv: avgConv(last3), score: avgOf(last3,'avg_score'), days: avgDays(last3) };
+  const avg12 = { coverage: avgPct(months,'covered','teachers_eom'), conv: avgConv(months), score: avgOf(months,'avg_score'), days: avgDays(months) };
+
+  // для графиков — хронологический порядок (старые слева)
+  const chrono = [...months].reverse();
+  const maxCov = Math.max(1, ...chrono.map(m => m.teachers_eom||0));
+
+  const courseName = analyticsCourse ? (courses.find(c=>c.slug===analyticsCourse)?.title || '') : 'Вся школа';
+
+  body.innerHTML = `
+    <h1 style="font-size:32px;margin-bottom:8px">📈 Аналитика</h1>
+    <p style="color:var(--gray);margin-bottom:16px">Динамика обучения по месяцам: охват, конверсия, качество.</p>
+
+    <div class="an-course-tabs">
+      <button class="an-ctab ${!analyticsCourse?'on':''}" onclick="openAnalytics(null)">🏫 Вся школа</button>
+      ${courses.map(c => `<button class="an-ctab ${analyticsCourse===c.slug?'on':''}" onclick="openAnalytics('${c.slug}')">${c.emoji||'📘'} ${esc(c.title)}</button>`).join('')}
+    </div>
+
+    <div class="an-section-title">${esc(courseName)} — по месяцам</div>
+    <div class="mtable-wrap">
+      <table class="mtable">
+        <thead>
+          <tr>
+            <th>Месяц</th>
+            <th title="Преподавателей на конец месяца">Преподов</th>
+            <th title="Охвачено обучением">Охват</th>
+            <th title="Процент охвата">%</th>
+            <th title="Назначено в этом месяце">Назнач.</th>
+            <th title="Завершили в этом месяце">Заверш.</th>
+            <th title="Конверсия: завершили от назначенных">Конв.</th>
+            <th title="Средний балл завершивших">Балл</th>
+            <th title="Средняя длительность, дней">Дней</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${months.map(m => {
+            const cov = m.teachers_eom ? Math.round(m.covered*100/m.teachers_eom) : 0;
+            const conv = m.assigned ? Math.round(m.completed*100/m.assigned) : null;
+            return `<tr>
+              <td style="font-weight:700;text-transform:capitalize">${esc(m.label)}</td>
+              <td>${m.teachers_eom}</td>
+              <td>${m.covered}</td>
+              <td><b>${cov}%</b></td>
+              <td>${m.assigned}</td>
+              <td>${m.completed}</td>
+              <td>${conv!=null?`<b class="${conv>=70?'g':conv>=40?'y':'r'}">${conv}%</b>`:'—'}</td>
+              <td>${m.avg_score!=null?m.avg_score+'%':'—'}</td>
+              <td>${m.avg_days!=null?m.avg_days:'—'}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+        <tfoot>
+          <tr class="mt-avg">
+            <td>Ср. за 3 мес</td><td colspan="2"></td>
+            <td><b>${avg3.coverage!=null?avg3.coverage+'%':'—'}</b></td>
+            <td colspan="2"></td>
+            <td><b>${avg3.conv!=null?avg3.conv+'%':'—'}</b></td>
+            <td>${avg3.score!=null?avg3.score+'%':'—'}</td>
+            <td>${avg3.days!=null?avg3.days:'—'}</td>
+          </tr>
+          <tr class="mt-avg">
+            <td>Ср. за год</td><td colspan="2"></td>
+            <td><b>${avg12.coverage!=null?avg12.coverage+'%':'—'}</b></td>
+            <td colspan="2"></td>
+            <td><b>${avg12.conv!=null?avg12.conv+'%':'—'}</b></td>
+            <td>${avg12.score!=null?avg12.score+'%':'—'}</td>
+            <td>${avg12.days!=null?avg12.days:'—'}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <div class="an-charts">
+      <div class="an-chart-box">
+        <div class="an-chart-title">Охват обучением по месяцам</div>
+        <div class="an-chart2">
+          ${chrono.map(m => {
+            const cov = m.teachers_eom ? Math.round(m.covered*100/m.teachers_eom) : 0;
+            return `<div class="ch2-col">
+              <div class="ch2-bars">
+                <div class="ch2-bar" style="height:${(m.teachers_eom||0)/maxCov*100}%;background:#E5E0F5" title="преподов: ${m.teachers_eom}"></div>
+                <div class="ch2-bar" style="height:${(m.covered||0)/maxCov*100}%;background:#7B61FF" title="охвачено: ${m.covered} (${cov}%)"></div>
+              </div>
+              <div class="ch2-label">${esc(m.label).slice(0,3)}</div>
+            </div>`;
+          }).join('')}
+        </div>
+        <div class="an-legend"><span>⬜ преподов всего</span><span>🟣 охвачено</span></div>
+      </div>
+
+      <div class="an-chart-box">
+        <div class="an-chart-title">Конверсия завершивших по месяцам</div>
+        <div class="an-chart2">
+          ${chrono.map(m => {
+            const conv = m.assigned ? Math.round(m.completed*100/m.assigned) : 0;
+            const col = conv>=70?'#22C55E':conv>=40?'#F59E0B':'#DC2626';
+            return `<div class="ch2-col">
+              <div class="ch2-bars">
+                <div class="ch2-bar" style="height:${conv}%;background:${col}" title="${conv}%"></div>
+              </div>
+              <div class="ch2-label">${esc(m.label).slice(0,3)}</div>
+            </div>`;
+          }).join('')}
+        </div>
+        <div class="an-legend"><span>🟢 ≥70%</span><span>🟡 40–69%</span><span>🔴 &lt;40%</span></div>
+      </div>
+    </div>`;
+}
+
+function avgPct(rows, num, den){
+  const valid = rows.filter(r => r[den]);
+  if (!valid.length) return null;
+  const totalNum = valid.reduce((a,r)=>a+Number(r[num]||0),0);
+  const totalDen = valid.reduce((a,r)=>a+Number(r[den]||0),0);
+  return totalDen ? Math.round(totalNum*100/totalDen) : null;
+}
+function avgConv(rows){
+  const valid = rows.filter(r => r.assigned);
+  if (!valid.length) return null;
+  const c = valid.reduce((a,r)=>a+Number(r.completed||0),0);
+  const a = valid.reduce((x,r)=>x+Number(r.assigned||0),0);
+  return a ? Math.round(c*100/a) : null;
+}
+function avgDays(rows){
+  const vals = rows.map(r=>r.avg_days).filter(v=>v!=null);
+  if (!vals.length) return null;
+  return Math.round(vals.reduce((a,b)=>a+Number(b),0)/vals.length*10)/10;
 }
 
 // ===== Фильтр по времени (общий) =====
