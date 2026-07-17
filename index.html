@@ -1899,6 +1899,7 @@ function renderFullWork(){
     <div class="fw-finish">
       <div style="font-size:13.5px;color:var(--gray);margin-bottom:10px">Когда выставлены все баллы, завершите проверку — преподаватель получит уведомление и увидит результат.</div>
       <button class="btn" style="font-size:16px;padding:14px 32px" onclick="finishReview('${enrollmentId}','${blockId}')">✅ Завершить проверку и отправить результат</button>
+      <button class="btn btn-ghost" style="font-size:15px;padding:14px 26px;margin-left:10px" onclick="returnForRevision('${enrollmentId}','${blockId}')">↩ Вернуть на доработку</button>
     </div>
     <div style="height:40px"></div>`;
 
@@ -1940,6 +1941,16 @@ async function saveGrade(enr, blk, sk, max){
   if (tEl && total) tEl.innerHTML = `<div class="fw-total-num">${total.total} / ${total.max}</div><div style="font-size:11.5px;color:var(--gray)">авто ${total.auto} + ручной ${total.manual}</div>`;
   btn.textContent = '✓ Сохранено'; btn.style.background = 'var(--gray)';
   setTimeout(()=>{ btn.textContent='Сохранить балл'; btn.style.background=''; }, 1500);
+}
+
+async function returnForRevision(enr, blk){
+  const comment = prompt('Что нужно доработать? (комментарий преподавателю — например, «Не заполнено задание 12 чтения»)\n\nМожно оставить пустым.');
+  if (comment === null) return;   // отмена
+  const { error } = await sb.rpc('learn_return_for_revision',
+    { p_enrollment_id: enr, p_block_id: blk, p_comment: comment || null });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  alert('↩ Работа возвращена на доработку. Преподавателю ушло уведомление и письмо. Статус «пройдено» сохранён — статистика не изменится.');
+  openReviewCabinet();
 }
 
 async function finishReview(enr, blk){
@@ -2273,6 +2284,13 @@ function renderLesson(slug, keepScroll){
     </div>`;
   // любое редактирование в уроке помечает «есть несохранённое»
   body.addEventListener('input', markDirty);
+  // автосохранение секций пробника при вводе (debounce 3с) — защита от потери
+  body.addEventListener('input', (e) => {
+    if (!e.target.closest('[id^="exq-"], [id^="exe-"]')) return;
+    if (window.__isEditor) return;
+    clearTimeout(window.__examAutosave);
+    window.__examAutosave = setTimeout(() => { autosaveAllExamSections(); }, 3000);
+  });
   body.addEventListener('change', markDirty);
   // запускаем таймер пробника, только если письменная не завершена и это ученик
   const writtenDone = window.__isEditor || !!(l.done_at || l.exam_reviewed);
@@ -2671,10 +2689,19 @@ async function runAudioParallel(blockId, task, mime, stage){
       clearInterval(recTimer);
       try { mediaRec.stop(); } catch(_){}
     });
-    // запрет перемотки аудио
+    // запрет перемотки: ловим только резкие скачки (перемотка), не обычный ход
     let lastT = 0;
     audio.addEventListener('timeupdate', () => {
-      if (audio.currentTime > lastT + 0.5) audio.currentTime = lastT; else lastT = audio.currentTime;
+      // нормальное воспроизведение продвигается плавно; перемотка = скачок > 1.5с
+      if (audio.currentTime > lastT + 1.5) {
+        audio.currentTime = lastT;   // откат перемотки вперёд
+      } else {
+        lastT = Math.max(lastT, audio.currentTime);
+      }
+    });
+    // запрет перемотки назад через seeking
+    audio.addEventListener('seeking', () => {
+      if (Math.abs(audio.currentTime - lastT) > 1.5) audio.currentTime = lastT;
     });
     // старт аудио — теперь после клика, autoplay разрешён.
     // если play() всё же упадёт — НЕ рушим запись: даём фиксированное время (по длине аудио или 6 мин)
@@ -2806,6 +2833,7 @@ function renderExam(b){
   const hasTimer = !!p.written_timer_sec;
   const started = !!timer;
   const preview = !!window.__isEditor;   // методист — режим предпросмотра
+  const revisionOpen = !preview && !!(currentCourseData && currentCourseData.revision_open);
 
   // экран «Начать тест» — только для ученика (не для предпросмотра)
   if (hasTimer && !started && !preview) {
@@ -2835,6 +2863,7 @@ function renderExam(b){
   return `<div class="block" id="exam-${b.id}" data-expired="${expired?1:0}" data-done="${writtenDone?1:0}">
     ${hasTimer && !writtenDone ? `<div class="exam-timer" id="exam-timer-${b.id}">⏱ <span id="tval-${b.id}">--:--</span></div>` : ''}
     ${preview ? '<div class="note" style="margin-bottom:14px">👁 Режим предпросмотра — вы видите урок как методист. Ответы не сохраняются.</div>' : ''}
+    ${revisionOpen ? `<div class="note warn" style="margin-bottom:14px"><b>✏️ Работа открыта для доработки.</b> ${currentCourseData.revision_note?esc(currentCourseData.revision_note):'Дозаполните или перезапишите задания и отправьте снова.'} Ваш статус «пройдено» сохранён.</div>` : ''}
     <div id="exam-result-${b.id}"></div>
     <div class="exam-head">
       <h2 style="font-size:22px;margin-bottom:8px">📝 ${esc(p.title || 'Пробник')}</h2>
@@ -2921,6 +2950,12 @@ function renderSection(blockId, sec, si, st){
     const s = st['audio'];
     const played = s?.answers?.played || (s?.review_status != null);
     const src = sec.url || (sec.path ? mediaUrl(sec.path) : '');
+    // методист — обычный плеер (можно слушать свободно)
+    if (window.__isEditor) {
+      return sectionWrap('🎧', sec.title || 'Аудирование', sec.note || '', `
+        ${src ? `<audio controls src="${esc(src)}" style="width:100%"></audio>`
+              : '<div class="note warn">Аудиофайл ещё не загружен организатором.</div>'}`);
+    }
     return sectionWrap('🎧', sec.title || 'Аудирование', sec.note || 'Аудио включается один раз и не перематывается — как на настоящем экзамене. Повторное прослушивание уже встроено в запись.', `
       <div id="audio-wrap-${blockId}" style="text-align:center">
         ${played
@@ -3010,6 +3045,23 @@ function renderSection(blockId, sec, si, st){
   }
   if (kind === 'speaking') {
     const st2 = st;
+    // методист — предпросмотр: плеер аудио вопросов + материал, без записи
+    if (window.__isEditor) {
+      return sectionWrap('🎤', sec.title, sec.note, `
+        <div style="display:flex;flex-direction:column;gap:14px">
+          ${(sec.tasks||[]).map(t => {
+            const imgList = (t.images || (t.image ? [t.image] : []));
+            const imgs = imgList.length ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin:8px 0">${imgList.map(pth => `<img src="${esc(mediaUrl(pth))}" style="flex:1;min-width:220px;max-width:100%;border-radius:10px;border:1px solid var(--cream-dark)">`).join('')}</div>` : '';
+            return `<div class="sp-task">
+              <b style="font-size:15px">${esc(t.label||t.id)}</b>
+              ${t.audio_path ? `<div style="margin-top:8px"><div style="font-size:12.5px;color:var(--gray);margin-bottom:4px">🎧 Аудио вопросов:</div><audio controls src="${esc(mediaUrl(t.audio_path))}" style="width:100%"></audio></div>` : ''}
+              ${t.prompt_html ? `<div class="block-text" style="margin-top:10px;font-size:14px">${t.prompt_html}</div>` : ''}
+              ${t.examiner_html ? `<div class="block-text" style="margin-top:8px;font-size:14px;background:#FBF3FF;padding:10px 12px;border-radius:8px">${t.examiner_html}</div>` : ''}
+              ${imgs}
+            </div>`;
+          }).join('')}
+        </div>`);
+    }
     return sectionWrap('🎤', sec.title, sec.note, `
       <div style="display:flex;flex-direction:column;gap:14px">
         ${(sec.tasks||[]).map((t, ti) => {
@@ -3033,14 +3085,15 @@ function renderSection(blockId, sec, si, st){
                   ${t.prepSec?`⏱ подготовка ${t.prepSec}с · `:''}${modeHint}${t.allowReRecord===false?' · без перезаписи':''}
                 </div>
               </div>
-              ${done==='pending'||done==='approved'
+              ${(done==='pending'||done==='approved') && !(currentCourseData && currentCourseData.revision_open)
                 ? `<span class="sp-done">✅ записано</span>`
                 : `<button class="btn" style="padding:10px 20px;font-size:14px"
-                     onclick='startSpeaking("${blockId}", ${JSON.stringify(t).replace(/'/g,"&#39;")})'>▶ Начать</button>`}
+                     onclick='startSpeaking("${blockId}", ${JSON.stringify(t).replace(/'/g,"&#39;")})'>${(done==='pending'||done==='approved')?'🔄 Перезаписать':'▶ Начать'}</button>`}
             </div>
             ${(() => {
               const material = `${t.prompt_html ? `<div class="block-text" style="margin-top:10px;font-size:14px">${t.prompt_html}</div>` : ''}${imgs}`;
-              const hideUntilStart = t.prepSec > 0 && !(done==='pending'||done==='approved');
+              const revOpen = currentCourseData && currentCourseData.revision_open;
+              const hideUntilStart = t.prepSec > 0 && !(done==='pending'||done==='approved') && !revOpen;
               if (!material) return '';
               if (hideUntilStart) {
                 return `<div id="sp-material-${blockId}-${t.id}" style="display:none">${material}</div>
@@ -3082,6 +3135,47 @@ function renderExamQuestion(blockId, q, qi, res, s){
       <input type="${q.type==='multi'?'checkbox':'radio'}" name="eq-${blockId}-${qi}" value="${oi}"
         ${(ans[qi]||[]).includes(oi)?'checked':''}><span>${esc(o)}</span></label>`).join('')}
   </div>`;
+}
+
+// автосохранение ВСЕХ секций пробника перед завершением (защита от потери)
+async function autosaveAllExamSections(){
+  const saves = [];
+  // quiz-секции
+  document.querySelectorAll('[id^="exq-"]').forEach(box => {
+    const m = box.id.match(/^exq-(.+)-(\d+)$/);
+    if (!m) return;
+    const blockId = m[1], si = m[2];
+    const answers = {};
+    let hasAny = false;
+    box.querySelectorAll('.q').forEach((qEl, idx) => {
+      const qi = qEl.dataset.qi ?? idx;
+      const checked = [...qEl.querySelectorAll('input:checked')].map(i => parseInt(i.value));
+      answers[qi] = checked;
+      if (checked.length) hasAny = true;
+    });
+    if (hasAny) saves.push(sb.rpc('learn_submit_exam',
+      { p_block_id: blockId, p_section: 'quiz_' + si, p_kind: 'quiz', p_answers: answers, p_meta: { si: +si, auto: true } }));
+  });
+  // exact-секции
+  document.querySelectorAll('[id^="exe-"]').forEach(box => {
+    const m = box.id.match(/^exe-(.+)-(\d+)$/);
+    if (!m) return;
+    const blockId = m[1], si = m[2];
+    const answers = {};
+    let hasAny = false;
+    box.querySelectorAll('.exe-field').forEach(f => {
+      answers[f.dataset.ii] = f.value.trim();
+      if (f.value.trim()) hasAny = true;
+    });
+    box.querySelectorAll('.seq-table').forEach(t => {
+      const seq = [...t.querySelectorAll('.seq-box')].map(b => b.value.trim()).join('');
+      answers[t.dataset.ii] = seq;
+      if (seq) hasAny = true;
+    });
+    if (hasAny) saves.push(sb.rpc('learn_submit_exam',
+      { p_block_id: blockId, p_section: 'exact_' + si, p_kind: 'exact', p_answers: answers, p_meta: { si: +si, auto: true } }));
+  });
+  if (saves.length) { try { await Promise.all(saves); } catch(_){} }
 }
 
 function collectExam(prefix, blockId, selector){
@@ -3277,6 +3371,8 @@ let __finishing = false;
 async function finishLesson(){
   if (__finishing) return;   // защита от повторных кликов
   __finishing = true;
+  // защита от потери: досохраняем все заполненные секции пробника
+  await autosaveAllExamSections();
   const { data, error } = await sb.rpc('learn_complete_lesson',
     { p_course_slug: currentCourse, p_lesson_slug: currentLesson.slug });
   if (error) { alert('Не получилось: ' + error.message); __finishing = false; return; }
