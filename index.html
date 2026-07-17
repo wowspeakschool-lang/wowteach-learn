@@ -234,6 +234,11 @@ button{font-family:inherit;cursor:pointer}
 .fw-tasktext{background:#F8F6FF;border-radius:10px;padding:14px 16px;margin-top:8px;font-size:13.5px;line-height:1.6}
 .fw-finish{background:#fff;border:2px solid var(--purple);border-radius:14px;padding:20px 24px;margin-top:20px;text-align:center}
 .exam-result-banner{background:linear-gradient(135deg,#EAF7EE,#F0ECFF);border:2px solid #22C55E;border-radius:14px;padding:18px 22px;margin-bottom:18px}
+.exam-pending-banner{background:linear-gradient(135deg,#FEF6E7,#FBF3FF);border:2px solid #F59E0B;border-radius:14px;padding:18px 22px;margin-bottom:18px}
+.exam-breakdown{display:flex;flex-direction:column;gap:6px;background:rgba(255,255,255,.6);border-radius:10px;padding:12px 14px}
+.ebd-item{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;font-weight:600}
+.ebd-score{color:var(--purple-dark);white-space:nowrap}
+.ebd-comment{font-size:13px;color:var(--gray);padding:4px 0 8px 8px;border-left:2px solid var(--cream-dark);margin-left:2px}
 .notif-panel{position:fixed;top:60px;right:24px;width:340px;max-width:90vw;max-height:70vh;overflow-y:auto;background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.15);z-index:100;padding:8px}
 .notif-item{padding:12px 14px;border-radius:10px;margin-bottom:4px}
 .notif-item.unread{background:#FBFAFF;border-left:3px solid var(--purple)}
@@ -696,6 +701,8 @@ function renderMyProgress(courses){
           ${c.completed_at ? '<span class="teach-chip ok">✅ курс пройден</span>'
             : c.suspended ? '<span class="teach-chip bad">🚫 доступ приостановлен</span>'
             : c.next_lesson ? `<span style="font-size:13px;color:var(--gray)">Дальше: <b>${esc(c.next_lesson)}</b></span>` : ''}
+          ${c.has_exam && c.exam_reviewed ? '<span class="teach-chip ok">✅ работа проверена</span>'
+            : c.has_exam && c.pending_review ? '<span class="teach-chip" style="background:#FEF3E2;color:#B45309">⏳ на проверке</span>' : ''}
           ${dl && !c.completed_at ? `<span class="teach-chip ${overdue?'bad':''}">${overdue?'⚠️ просрочен':'дедлайн'} ${dl}</span>` : ''}
           ${c.missed_count>0?`<span class="teach-chip bad">${c.missed_count} пропуск.</span>`:''}
         </div>
@@ -944,7 +951,7 @@ function renderLessonBreakdown(det){
       <div class="cd-stat"><div class="cd-num">${s.assigned||0}</div><div class="cd-lbl">назначено</div></div>
       <div class="cd-stat"><div class="cd-num">${s.completed||0}</div><div class="cd-lbl">завершили</div></div>
       <div class="cd-stat"><div class="cd-num">${s.avg_score!=null?s.avg_score+'%':'—'}</div><div class="cd-lbl">средний балл</div></div>
-      <div class="cd-stat"><div class="cd-num">${s.avg_course_hours!=null?s.avg_course_hours+'ч':'—'}</div><div class="cd-lbl">среднее время</div></div>
+      <div class="cd-stat"><div class="cd-num">${fmtHours(s.avg_course_hours)}</div><div class="cd-lbl">среднее время</div></div>
     </div>
     <div class="mtable-wrap">
       <table class="mtable">
@@ -954,7 +961,7 @@ function renderLessonBreakdown(det){
             <td style="font-weight:700">${esc(l.title)} <span style="color:var(--purple);font-size:11px">▸</span></td>
             <td>${l.completed}</td>
             <td>${l.avg_score!=null?`<b>${l.avg_score}%</b>`:'—'}</td>
-            <td>${l.avg_hours!=null?l.avg_hours+'ч':'—'}</td>
+            <td>${fmtHours(l.avg_hours)}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -992,7 +999,7 @@ async function openLessonDetail(lessonSlug){
       <div class="cd-stat"><div class="cd-num">${s.completed||0}</div><div class="cd-lbl">прошли</div></div>
       <div class="cd-stat"><div class="cd-num">${s.stuck||0}</div><div class="cd-lbl">застряли</div></div>
       <div class="cd-stat"><div class="cd-num">${s.avg_score!=null?s.avg_score+'%':'—'}</div><div class="cd-lbl">ср. балл</div></div>
-      <div class="cd-stat"><div class="cd-num">${s.avg_hours!=null?s.avg_hours+'ч':'—'}</div><div class="cd-lbl">ср. время</div></div>
+      <div class="cd-stat"><div class="cd-num">${fmtHours(s.avg_hours)}</div><div class="cd-lbl">ср. время</div></div>
       <div class="cd-stat"><div class="cd-num">${s.avg_stars!=null?s.avg_stars:'—'}</div><div class="cd-lbl">ср. оценка</div></div>
     </div>
 
@@ -1015,7 +1022,7 @@ async function openLessonDetail(lessonSlug){
       ${done.map(t => `<div class="cd-lrow">
         <div style="flex:2;font-weight:600">${esc(t.teacher)}</div>
         ${d.has_exam?`<div>${t.score!=null?`<b>${t.score}%</b>`:'—'}</div>`:''}
-        <div>${t.hours!=null?t.hours+'ч':'—'}</div>
+        <div>${fmtHours(t.hours)}</div>
         <div style="font-size:12px;color:var(--gray)">${fmt(t.date)}</div>
       </div>`).join('')}
     </div>` : '<div class="note">Пока никто не прошёл.</div>'}
@@ -1418,7 +1425,7 @@ function renderCourseDetail(d){
         <div class="cd-stat"><div class="cd-num">${s.assigned||0}</div><div class="cd-lbl">назначено</div></div>
         <div class="cd-stat"><div class="cd-num">${s.completed||0}</div><div class="cd-lbl">завершили</div></div>
         <div class="cd-stat"><div class="cd-num">${s.avg_score!=null?s.avg_score+'%':'—'}</div><div class="cd-lbl">средний балл</div></div>
-        <div class="cd-stat"><div class="cd-num">${s.avg_course_hours!=null?s.avg_course_hours+'ч':'—'}</div><div class="cd-lbl">среднее время</div></div>
+        <div class="cd-stat"><div class="cd-num">${fmtHours(s.avg_course_hours)}</div><div class="cd-lbl">среднее время</div></div>
       </div>
       <h3 style="font-size:16px;margin:22px 0 10px">По урокам</h3>
       <div class="cd-lessons">
@@ -1428,7 +1435,7 @@ function renderCourseDetail(d){
             <div style="flex:2;font-weight:600">${esc(l.title)}</div>
             <div>${l.completed}</div>
             <div>${l.avg_score!=null?`<b>${l.avg_score}%</b>`:'—'}</div>
-            <div>${l.avg_hours!=null?l.avg_hours+'ч':'—'}</div>
+            <div>${fmtHours(l.avg_hours)}</div>
           </div>`).join('')}
       </div>
     </div>`;
@@ -2217,15 +2224,47 @@ async function loadExamResults(l){
   const holder = document.getElementById('exam-result-' + examBlock.id);
   if (!holder) return;
   const { data } = await sb.rpc('learn_exam_result', { p_block_id: examBlock.id });
-  if (!data || !data.reviewed) return;
+
+  // если ещё не проверено — плашка «На проверке» (урок завершён, ждём методиста)
+  if (!data || !data.reviewed) {
+    // показываем плашку только если урок уже сдан (есть завершение)
+    if (l.done_at) {
+      holder.innerHTML = `<div class="exam-pending-banner">
+        <div style="font-size:13px;font-weight:800;color:#B45309;text-transform:uppercase;letter-spacing:.5px">⏳ На проверке</div>
+        <div style="font-size:14px;margin-top:6px;color:var(--ink)">Ваша работа отправлена методисту. Результат появится здесь после проверки — придёт уведомление.</div>
+      </div>`;
+    }
+    return;
+  }
+
+  // проверено — результат + разбор
   let line;
   if (data.secondary != null) line = `Первичный балл: <b>${data.primary}</b> из ${data.max} · Тестовый балл: <b>${data.secondary}</b> из 100`;
   else if (data.grade != null) line = `Первичный балл: <b>${data.primary}</b> из ${data.max} · Оценка: <b>${data.grade}</b>`;
   else line = `Балл: <b>${data.primary}</b> из ${data.max}`;
+
+  const tasks = data.tasks || [];
+  const breakdown = tasks.length ? `
+    <div style="margin-top:14px">
+      <button class="fw-toggle" onclick="const b=this.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';this.textContent=b.style.display==='none'?'📋 Показать разбор по заданиям':'📋 Скрыть разбор'">📋 Показать разбор по заданиям</button>
+      <div style="display:none;margin-top:10px" class="exam-breakdown">
+        ${tasks.map(t => t.kind === 'auto'
+          ? `<div class="ebd-item">
+               <span>${esc(t.title)}</span>
+               <span class="ebd-score">${t.correct}/${t.total} верно</span>
+             </div>`
+          : `<div class="ebd-item">
+               <span>${esc(t.title)}</span>
+               <span class="ebd-score">${t.score!=null?t.score:'—'}${t.max?' / '+t.max:''} балл</span>
+             </div>${t.comment?`<div class="ebd-comment">💬 ${esc(t.comment)}</div>`:''}`
+        ).join('')}
+      </div>
+    </div>` : '';
+
   holder.innerHTML = `<div class="exam-result-banner">
     <div style="font-size:13px;font-weight:800;color:#15803D;text-transform:uppercase;letter-spacing:.5px">✅ Работа проверена методистом</div>
     <div style="font-size:19px;margin-top:6px">${line}</div>
-    <div style="font-size:12.5px;color:var(--gray);margin-top:6px">Комментарии методиста — под соответствующими заданиями ниже.</div>
+    ${breakdown}
   </div>`;
 }
 
@@ -3244,6 +3283,15 @@ function plural(n, one, few, many){
   if (m10 === 1 && m100 !== 11) return one;
   if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
   return many;
+}
+function fmtHours(h){
+  if (h == null) return '—';
+  const totalMin = Math.round(Number(h) * 60);
+  const hh = Math.floor(totalMin / 60);
+  const mm = totalMin % 60;
+  if (hh === 0) return mm + 'м';
+  if (mm === 0) return hh + 'ч';
+  return hh + 'ч ' + mm + 'м';
 }
 </script>
 </body>
