@@ -251,7 +251,7 @@ button{font-family:inherit;cursor:pointer}
 .exam-breakdown{display:flex;flex-direction:column;gap:6px;background:rgba(255,255,255,.6);border-radius:10px;padding:12px 14px}
 .ebd-item{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;font-weight:600}
 .ebd-score{color:var(--purple-dark);white-space:nowrap}
-.ebd-comment{font-size:13px;color:var(--gray);padding:4px 0 8px 8px;border-left:2px solid var(--cream-dark);margin-left:2px}
+.ebd-comment{font-size:14px;line-height:1.6;color:var(--ink);background:#fff;border-left:3px solid var(--purple);border-radius:0 8px 8px 0;padding:10px 14px;margin:6px 0 10px 2px;white-space:pre-wrap;word-break:break-word}
 .notif-panel{position:fixed;top:60px;right:24px;width:340px;max-width:90vw;max-height:70vh;overflow-y:auto;background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.15);z-index:100;padding:8px}
 .notif-item{padding:12px 14px;border-radius:10px;margin-bottom:4px}
 .notif-item.unread{background:#FBFAFF;border-left:3px solid var(--purple)}
@@ -1906,6 +1906,10 @@ function renderFullWork(){
   Object.entries(subs).forEach(([sk, s]) => {
     if (s.meta?.parts?.length || s.storage_path) loadFullWorkMedia(sk, s);
   });
+  // уже написанные комментарии раскрываем на всю высоту (чтобы не листать в мини-окошке)
+  document.querySelectorAll('[id^="gr-comment-"]').forEach(ta => {
+    if (ta.value.trim()) { ta.style.height = 'auto'; ta.style.height = Math.max(130, ta.scrollHeight + 4) + 'px'; }
+  });
 }
 
 function gradeInput(enr, blk, sk, max, g){
@@ -1918,8 +1922,9 @@ function gradeInput(enr, blk, sk, max, g){
         style="width:80px;padding:8px 10px;border:2px solid var(--cream-dark);border-radius:8px;font-size:15px;font-weight:700;background:#FDFCF8">
       <span style="color:var(--gray);font-size:13px">из ${max||'—'}</span>
     </div>
-    <textarea id="gr-comment-${sk}" placeholder="Комментарий преподавателю…"
-      style="width:100%;min-height:50px;padding:8px 12px;border:2px solid var(--cream-dark);border-radius:8px;font-size:13.5px;background:#FDFCF8;margin-top:8px;resize:vertical">${esc(cmt)}</textarea>
+    <textarea id="gr-comment-${sk}" placeholder="Комментарий преподавателю… (что получилось, что доработать)"
+      oninput="this.style.height='auto';this.style.height=Math.max(130,this.scrollHeight+4)+'px'"
+      style="width:100%;min-height:130px;padding:12px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:14px;line-height:1.55;background:#FDFCF8;margin-top:10px;resize:vertical;font-family:inherit">${esc(cmt)}</textarea>
     <button class="btn btn-green" style="padding:7px 18px;font-size:13px;margin-top:8px" onclick="saveGrade('${enr}','${blk}','${sk}',${max||0})">Сохранить балл</button>
   </div>`;
 }
@@ -2348,7 +2353,7 @@ async function loadExamResults(l){
           : `<div class="ebd-item">
                <span>${esc(t.title)}</span>
                <span class="ebd-score">${t.score!=null?t.score:'—'}${t.max?' / '+t.max:''} балл</span>
-             </div>${t.comment?`<div class="ebd-comment">💬 ${esc(t.comment)}</div>`:''}`
+             </div>${t.comment?`<div class="ebd-comment"><b style="color:var(--purple-dark)">💬 Комментарий методиста:</b><br>${esc(t.comment)}</div>`:''}`
         ).join('')}
       </div>
     </div>` : '';
