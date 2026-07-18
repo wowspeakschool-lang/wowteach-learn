@@ -239,6 +239,11 @@ button{font-family:inherit;cursor:pointer}
 .fw-total-num{font-family:'Fredoka',sans-serif;font-weight:600;font-size:28px;color:var(--purple-dark);line-height:1}
 .fw-divider{font-family:'Fredoka',sans-serif;font-weight:600;font-size:16px;color:var(--purple-dark);margin:20px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--cream-dark)}
 .fw-sec{background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:16px 18px;margin-bottom:12px}
+.fw-section{background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:16px 18px;margin-bottom:12px}
+.fw-answer{background:#FBFAF7;border:1px solid var(--cream-dark);border-radius:10px;padding:14px 16px;font-size:14.5px;line-height:1.65;word-break:break-word}
+.fw-answer img{max-width:100%;border-radius:8px}
+.fw-answer table{border-collapse:collapse;max-width:100%}
+.fw-answer td,.fw-answer th{border:1px solid var(--cream-dark);padding:6px 10px}
 .fw-sec-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;font-size:15px}
 .fw-auto{font-size:12.5px;font-weight:800;background:var(--green-light);color:#15803D;border-radius:999px;padding:3px 12px}
 .fw-max{font-size:12px;font-weight:700;color:var(--gray)}
@@ -1915,15 +1920,35 @@ function renderHomeworkWork(){
 
   const answersHtml = entries.length ? entries.map(([key, s]) => {
     const a = s.answers || {};
-    const text = a.text || a.answer || '';
     const when = s.submitted_at ? new Date(s.submitted_at).toLocaleString('ru-RU') : '';
+
+    // ответ может прийти как форматированный текст (html), простой текст или результаты теста
+    const rich = a.html && String(a.html).trim();
+    const text = !rich && (a.text || a.answer) ? String(a.text || a.answer) : '';
+    const res  = a.__results && typeof a.__results === 'object' ? a.__results : null;
+    const isQuiz = !rich && !text && res;
+
+    let bodyHtml;
+    if (rich) {
+      bodyHtml = `<div class="fw-answer">${a.html}</div>`;
+    } else if (text) {
+      bodyHtml = `<div class="fw-answer" style="white-space:pre-wrap">${esc(text)}</div>`;
+    } else if (isQuiz) {
+      const vals = Object.values(res);
+      const ok = vals.filter(v => v === true).length;
+      bodyHtml = `<div class="fw-answer">Тест выполнен автоматически: <b>${ok} из ${vals.length}</b> верно.</div>`;
+    } else if (s.storage_path) {
+      bodyHtml = '<div class="note">Ответ прикреплён файлом.</div>';
+    } else {
+      bodyHtml = '<div class="note">Пустой ответ.</div>';
+    }
+
     return `<div class="fw-section">
       <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
-        <b style="font-size:15px">Ответ преподавателя</b>
+        <b style="font-size:15px">${isQuiz ? 'Тест по лекции' : 'Ответ преподавателя'}</b>
         <span style="font-size:12px;color:var(--gray)">${when}</span>
       </div>
-      ${text ? `<div class="fw-answer" style="white-space:pre-wrap">${esc(text)}</div>`
-             : '<div class="note">Текстового ответа нет.</div>'}
+      ${bodyHtml}
       ${s.storage_path ? `<div style="margin-top:10px"><button class="btn btn-ghost" style="padding:9px 18px;font-size:13px"
           onclick="openSubmissionFile('${esc(s.storage_path)}', this)">📎 Открыть прикреплённый файл</button></div>` : ''}
     </div>`;
