@@ -2282,16 +2282,23 @@ function renderLesson(slug, keepScroll){
         ? '<div class="note ok">✅ Урок пройден</div>'
         : `<button class="btn btn-green" onclick="finishLesson()">Завершить урок ✓</button>`}
     </div>`;
-  // любое редактирование в уроке помечает «есть несохранённое»
-  body.addEventListener('input', markDirty);
-  // автосохранение секций пробника при вводе (debounce 3с) — защита от потери
-  body.addEventListener('input', (e) => {
-    if (!e.target.closest('[id^="exq-"], [id^="exe-"]')) return;
-    if (window.__isEditor) return;
-    clearTimeout(window.__examAutosave);
-    window.__examAutosave = setTimeout(() => { autosaveAllExamSections(); }, 3000);
-  });
-  body.addEventListener('change', markDirty);
+  // слушатели вешаем ОДИН раз (иначе накапливаются при каждой перерисовке)
+  if (!body.dataset.listenersAttached) {
+    body.dataset.listenersAttached = '1';
+    // любое редактирование в уроке помечает «есть несохранённое»
+    body.addEventListener('input', markDirty);
+    // автосохранение секций пробника при вводе (debounce 3с) — защита от потери
+    body.addEventListener('input', (e) => {
+      const secBox = e.target.closest('[id^="exq-"], [id^="exe-"]');
+      if (!secBox) return;
+      if (window.__isEditor) return;
+      // сохраняем ТОЛЬКО ту секцию, где печатали (не все сразу — иначе шквал запросов)
+      clearTimeout(window.__examAutosave);
+      const boxId = secBox.id;
+      window.__examAutosave = setTimeout(() => { autosaveOneSection(boxId); }, 2500);
+    });
+    body.addEventListener('change', markDirty);
+  }
   // запускаем таймер пробника, только если письменная не завершена и это ученик
   const writtenDone = window.__isEditor || !!(l.done_at || l.exam_reviewed);
   const examBlock = (l.blocks||[]).find(bl => bl.type === 'exam' && bl.exam_timer);
@@ -3137,6 +3144,42 @@ function renderExamQuestion(blockId, q, qi, res, s){
   </div>`;
 }
 
+// автосохранение ОДНОЙ секции (по id контейнера) — лёгкое, при вводе
+async function autosaveOneSection(boxId){
+  const box = document.getElementById(boxId);
+  if (!box) return;
+  const mq = boxId.match(/^exq-(.+)-(\d+)$/);
+  const me = boxId.match(/^exe-(.+)-(\d+)$/);
+  try {
+    if (mq) {
+      const [, blockId, si] = mq;
+      const answers = {}; let hasAny = false;
+      box.querySelectorAll('.q').forEach((qEl, idx) => {
+        const qi = qEl.dataset.qi ?? idx;
+        const checked = [...qEl.querySelectorAll('input:checked')].map(i => parseInt(i.value));
+        answers[qi] = checked;
+        if (checked.length) hasAny = true;
+      });
+      if (hasAny) await sb.rpc('learn_submit_exam',
+        { p_block_id: blockId, p_section: 'quiz_' + si, p_kind: 'quiz', p_answers: answers, p_meta: { si: +si, auto: true } });
+    } else if (me) {
+      const [, blockId, si] = me;
+      const answers = {}; let hasAny = false;
+      box.querySelectorAll('.exe-field').forEach(f => {
+        answers[f.dataset.ii] = f.value.trim();
+        if (f.value.trim()) hasAny = true;
+      });
+      box.querySelectorAll('.seq-table').forEach(t => {
+        const seq = [...t.querySelectorAll('.seq-box')].map(b => b.value.trim()).join('');
+        answers[t.dataset.ii] = seq;
+        if (seq) hasAny = true;
+      });
+      if (hasAny) await sb.rpc('learn_submit_exam',
+        { p_block_id: blockId, p_section: 'exact_' + si, p_kind: 'exact', p_answers: answers, p_meta: { si: +si, auto: true } });
+    }
+  } catch(_){}
+}
+
 // автосохранение ВСЕХ секций пробника перед завершением (защита от потери)
 async function autosaveAllExamSections(){
   const saves = [];
@@ -3257,12 +3300,28 @@ async function submitWriting(blockId, key){
   } catch(e){ alert('Не получилось: ' + (e.message||e)); }
 }
 async function submitReflection(blockId){
-  const text = document.getElementById('refl-' + blockId).value.trim();
+  const ta = document.getElementById('refl-' + blockId);
+  const text = ta.value.trim();
   if (!text) { alert('Напишите ответ.'); return; }
+  const btn = document.querySelector(`#refl-box-${blockId} .btn`) || ta.parentElement.querySelector('.btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Отправляю…'; }
   const { error } = await sb.rpc('learn_submit_exam',
     { p_block_id: blockId, p_section: 'reflection', p_kind: 'text', p_answers: { text } });
-  if (error) { alert(error.message); return; }
-  refreshLesson();
+  if (error) {
+    alert('Не отправилось: ' + error.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Отправить'; }
+    return;
+  }
+  // явное подтверждение — препод должен видеть, что ответ ушёл
+  if (btn) { btn.textContent = '✅ Отправлено'; btn.classList.add('btn-green'); }
+  const box = ta.closest('.sec-body') || ta.parentElement;
+  if (box && !box.querySelector('.refl-ok')) {
+    const ok = document.createElement('div');
+    ok.className = 'note ok refl-ok';
+    ok.style.marginTop = '10px';
+    ok.textContent = '✅ Рефлексия сохранена.';
+    box.appendChild(ok);
+  }
 }
 
 async function submitExact(blockId){
