@@ -77,6 +77,9 @@ button{font-family:inherit;cursor:pointer}
 .lesson-item.locked{opacity:.55;cursor:not-allowed;background:#FAF8F3}
 .lesson-item.locked:hover{border-color:var(--cream-dark)}
 .lesson-item.done{border-color:var(--green);background:var(--green-light)}
+.lesson-item.pending{border-color:#F59E0B;background:#FEF6E7}
+.lesson-item.pending .n{background:#F59E0B;color:#fff}
+.lesson-chip-pending{font-size:11.5px;font-weight:800;color:#B45309;background:#FDE8C8;border-radius:999px;padding:4px 11px;white-space:nowrap}
 .lesson-item .n{width:32px;height:32px;border-radius:50%;background:var(--cream-dark);color:var(--gray);
   display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;flex-shrink:0}
 .lesson-item.done .n{background:var(--green);color:#fff}
@@ -642,12 +645,14 @@ async function openCourse(slug, fromRoute){
     </div>
 
     ${(data.lessons||[]).map((l, i) => `
-      <div class="lesson-item ${l.done_at?'done':''} ${l.locked?'locked':''}"
+      <div class="lesson-item ${l.done_at?'done':''} ${l.locked?'locked':''} ${(!l.done_at && l.pending_review)?'pending':''}"
            onclick="${l.locked ? '' : `go('lesson/${currentCourse}/${l.slug}')`}">
-        <div class="n">${l.done_at ? '✓' : (l.locked ? '🔒' : i+1)}</div>
+        <div class="n">${l.done_at ? '✓' : (l.locked ? '🔒' : (l.pending_review ? '⏳' : i+1))}</div>
         <div class="t"><b>${esc(l.title)}</b>
           <span>${esc(l.summary || '')}${l.score != null ? ` · результат ${l.score}%` : ''}</span></div>
-        ${l.locked ? '<span style="font-size:12px;color:var(--gray)">пройдите предыдущий</span>' : '<span style="color:var(--purple);font-weight:800">→</span>'}
+        ${l.locked ? '<span style="font-size:12px;color:var(--gray)">пройдите предыдущий</span>'
+          : (!l.done_at && l.pending_review) ? '<span class="lesson-chip-pending">на проверке</span>'
+          : '<span style="color:var(--purple);font-weight:800">→</span>'}
       </div>`).join('')}
   `;
 }
@@ -2488,6 +2493,9 @@ function renderBlock(b){
     } else if (p.provider === 'vimeo') {
       const id = (p.url||'').match(/vimeo\.com\/(\d+)/)?.[1] || '';
       embed = `<iframe src="https://player.vimeo.com/video/${id}" allowfullscreen></iframe>`;
+    } else if (p.provider === 'storage' || p.path) {
+      // файл в бакете learn-media: указываем только путь, ссылка собирается сама
+      embed = `<video controls preload="metadata" src="${esc(mediaUrl(p.path || p.url || ''))}"></video>`;
     } else {
       embed = `<video controls src="${esc(p.url||'')}"></video>`;
     }
@@ -2911,8 +2919,14 @@ async function finishSpeaking(blockId, task, mime, stage){
       p_meta: { task: task.id, parts: paths, count: paths.length }
     });
     if (error) throw error;
-    stage.innerHTML = `<div class="note ok">✅ Запись отправлена методисту.</div>`;
-    setTimeout(refreshLesson, 800);
+    // НЕ перерисовываем урок целиком: это стирало бы незаполненные секции.
+    // Показываем результат локально и даём перезаписать.
+    stage.innerHTML = `
+      <div class="note ok">✅ Запись отправлена методисту.</div>
+      <div style="margin-top:10px">
+        <button class="btn btn-ghost" style="padding:9px 18px;font-size:13.5px"
+          onclick='startSpeaking("${blockId}", ${JSON.stringify(task).replace(/'/g,"&#39;")})'>🔄 Перезаписать</button>
+      </div>`;
   } catch(e) {
     stage.innerHTML = `<div class="note err">Не удалось загрузить запись: ${esc(e.message||e)}</div>`;
   }
