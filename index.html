@@ -220,6 +220,8 @@ button{font-family:inherit;cursor:pointer}
 .tp-flag.warn{background:#FEF3E2;color:#B45309}
 .tp-body{border-top:1px solid var(--cream);padding:14px 16px;display:flex;flex-direction:column;gap:12px;background:#FDFCFA}
 .tp-course{background:#fff;border:1px solid var(--cream-dark);border-radius:10px;padding:13px 15px}
+.tp-lessons{margin-top:10px;border-top:1px dashed var(--cream-dark);padding-top:8px;display:flex;flex-direction:column;gap:4px}
+.tp-lesson{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:3px 0}
 .prog-orow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:12px 16px}
 .an-funnel{background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;padding:16px 18px}
 .fn-bar{margin-bottom:6px}
@@ -504,6 +506,8 @@ function applyRoute(){
   if (parts[0] === 'analytics') { openAnalytics(); return; }
   if (parts[0] === 'feedback') { openFeedback(); return; }
   if (parts[0] === 'lesson' && parts[1] && parts[2]) { openLessonRoute(parts[1], parts[2]); return; }
+  // прямая ссылка на работу препода: #work/{enrollment_id}/{block_id}[/{откуда}]
+  if (parts[0] === 'work' && parts[1] && parts[2]) { openFullWork(parts[1], parts[2], parts[3] || 'direct'); return; }
   showCatalog(true);
 }
 
@@ -774,6 +778,7 @@ function renderProgressOverview(rows){
               else if (c.suspended) status = '<span class="tp-flag bad">🚫 приостановлен</span>';
               else if (c.pending_review) status = '<span class="tp-flag warn">⏳ на проверке</span>';
               else status = '<span class="tp-flag">учится</span>';
+              if (c.revision_open) status += ' <span class="tp-flag warn">✏️ на доработке</span>';
               return `<div class="tp-course">
                 <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center">
                   <div style="font-weight:700;font-size:14px">${c.emoji||'📘'} ${esc(c.title)}</div>
@@ -786,6 +791,18 @@ function renderProgressOverview(rows){
                   ${dl ? `<span style="${overdue?'color:var(--red);font-weight:700':''}">${overdue?'⚠️ просрочен':'📅 дедлайн'}: ${dl.toLocaleDateString('ru-RU')}</span>` : ''}
                   <span>${c.mode==='individual'?'👤 индивидуально':'👥 поток'}</span>
                 </div>
+                ${(c.lessons||[]).length ? `<div class="tp-lessons">
+                  ${c.lessons.map(ls => {
+                    const done = !!ls.done_at;
+                    const dd = done ? new Date(ls.done_at).toLocaleDateString('ru-RU') : '';
+                    return `<div class="tp-lesson">
+                      <span>${done?'✅':(ls.started_at?'🔸':'⚪️')} ${esc(ls.title)}${ls.has_exam?' 📝':''}</span>
+                      <span style="color:var(--gray);font-size:11.5px">${done?dd:(ls.started_at?'начат':'не начат')}</span>
+                    </div>`;
+                  }).join('')}
+                </div>` : ''}
+                ${c.exam_block_id && c.has_submissions ? `<button class="btn btn-ghost" style="margin-top:10px;padding:8px 16px;font-size:13px"
+                  onclick="openWorkTab('${c.enrollment_id}','${c.exam_block_id}',event)">📄 Посмотреть работу целиком →</button>` : ''}
               </div>`;
             }).join('')}
           </div>
@@ -1649,13 +1666,30 @@ function renderReviewCabinet(){
     <h1 style="font-size:32px;margin-bottom:16px">✅ Проверка работ</h1>
     <div class="rev-tabs">
       <button class="rev-tab ${reviewTab==='queue'?'on':''}" onclick="switchReviewTab('queue')">📋 Очередь (${reviews.length})</button>
+      <button class="rev-tab ${reviewTab==='archive'?'on':''}" onclick="switchReviewTab('archive')">✅ Проверенные</button>
       <button class="rev-tab ${reviewTab==='notifs'?'on':''}" onclick="switchReviewTab('notifs')">🔔 Уведомления${unread?` <span class="rev-dot">${unread}</span>`:''}</button>
     </div>
     <div id="revContent"></div>`;
   renderReviewContent();
 }
 
-function switchReviewTab(t){ reviewTab = t; renderReviewCabinet(); if (t==='notifs') markNotifsRead(); if (t==='teachers') loadTeachers(); }
+function switchReviewTab(t){
+  reviewTab = t;
+  renderReviewCabinet();
+  if (t==='notifs') markNotifsRead();
+  if (t==='teachers') loadTeachers();
+  if (t==='archive') loadReviewedWorks();
+}
+
+let archiveSearch = '';
+async function loadReviewedWorks(){
+  const el = document.getElementById('revContent');
+  if (el) el.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray)">Загружаю проверенные работы…</div>';
+  const { data, error } = await sb.rpc('learn_reviewed_works', { p_search: archiveSearch || null, p_limit: 200 });
+  if (error) { if (el) el.innerHTML = '<div class="note warn">'+esc(error.message)+'</div>'; return; }
+  window.__reviewedWorks = data || [];
+  renderReviewContent();
+}
 
 async function markNotifsRead(){
   try { await sb.rpc('learn_mark_notifications_read'); } catch(_){}
@@ -1664,6 +1698,31 @@ async function markNotifsRead(){
 function renderReviewContent(){
   const el = document.getElementById('revContent');
   if (reviewTab === 'teachers') { renderTeachers(el); return; }
+  if (reviewTab === 'archive') {
+    const works = window.__reviewedWorks;
+    if (!works) { el.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray)">Загружаю…</div>'; return; }
+    const search = `<input placeholder="🔍 Поиск по преподавателю или обучению…" value="${esc(archiveSearch)}"
+      oninput="archiveSearch=this.value;clearTimeout(window.__archTmr);window.__archTmr=setTimeout(loadReviewedWorks,400)"
+      style="width:100%;padding:11px 15px;border:2px solid var(--cream-dark);border-radius:11px;font-size:14px;background:#fff;margin-bottom:14px">`;
+    if (!works.length) { el.innerHTML = search + '<div class="note">Проверенных работ пока нет.</div>'; return; }
+    el.innerHTML = search + works.map(w => {
+      const d = w.reviewed_at ? new Date(w.reviewed_at).toLocaleDateString('ru-RU') : '';
+      return `<div class="rev-card">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center">
+          <div>
+            <div style="font-weight:800;font-size:16px">${esc(w.teacher||'—')}
+              ${w.revision_open?'<span class="teach-chip" style="background:#FEF3E2;color:#B45309;margin-left:6px">✏️ на доработке</span>':''}</div>
+            <div style="font-size:12.5px;color:var(--gray)">${w.emoji||'📘'} ${esc(w.course||'')} · ${esc(w.lesson||'')}${d?' · проверена '+d:''}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            ${w.total!=null?`<div style="text-align:right"><div style="font-size:18px;font-weight:800">${w.total}<span style="font-size:13px;color:var(--gray)">/${w.max}</span></div>${w.pct!=null?`<div style="font-size:11.5px;color:var(--gray)">${w.pct}%</div>`:''}</div>`:''}
+            <button class="btn btn-ghost" style="padding:10px 20px" onclick="openWorkTab('${w.enrollment_id}','${w.block_id}',event)">Посмотреть работу →</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    return;
+  }
   if (reviewTab === 'queue') {
     const reviews = window.__reviews || [];
     if (!reviews.length) { el.innerHTML = '<div class="note ok">🎉 Очередь пуста — все работы проверены.</div>'; return; }
@@ -1683,7 +1742,7 @@ function renderReviewContent(){
             <div style="font-weight:800;font-size:16px">${esc(w.student||'—')}</div>
             <div style="font-size:12.5px;color:var(--gray)">${esc(w.course||'')} · ${esc(w.lesson||'')} · ${w.count} ${plural(w.count,'задание','задания','заданий')} на проверку</div>
           </div>
-          <button class="btn" style="padding:10px 22px" onclick="openFullWork('${enr}','${w.block_id||w.id}')">Открыть работу целиком →</button>
+          <button class="btn" style="padding:10px 22px" onclick="openFullWork('${enr}','${w.block_id||w.id}','queue')">Открыть работу целиком →</button>
         </div>
       </div>`;
     }).join('');
@@ -1764,8 +1823,33 @@ async function resumeAccess(enrollmentId){
   openReviewCabinet();
 }
 
+// открыть работу в НОВОЙ вкладке по прямой ссылке
+function workUrl(enr, blk){
+  return location.origin + location.pathname + location.search + '#work/' + enr + '/' + blk;
+}
+function openWorkTab(enr, blk, ev){
+  if (ev) ev.stopPropagation();
+  window.open(workUrl(enr, blk), '_blank', 'noopener');
+}
+
+async function copyWorkLink(enr, blk, btn){
+  const url = workUrl(enr, blk);
+  try { await navigator.clipboard.writeText(url); }
+  catch(_) { prompt('Скопируйте ссылку:', url); return; }
+  if (btn) { const t = btn.textContent; btn.textContent = '✅ Скопировано'; setTimeout(()=>{ btn.textContent = t; }, 1800); }
+}
+
+function backFromFullWork(){
+  const from = window.__fwReturn || 'queue';
+  window.__fwReturn = null;
+  if (from === 'progress') { openProgress(); return; }
+  if (from === 'archive') { openReviewCabinet('archive'); loadReviewedWorks(); return; }
+  openReviewCabinet('queue');
+}
+
 // ===== Проверка работы целиком =====
-async function openFullWork(enrollmentId, blockId){
+async function openFullWork(enrollmentId, blockId, from){
+  window.__fwReturn = from || window.__fwReturn || 'queue';
   show('review');
   const body = document.getElementById('reviewBody');
   body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Загружаю работу…</div>';
@@ -1884,7 +1968,8 @@ function renderFullWork(){
   }).join('');
 
   body.innerHTML = `
-    <button class="btn btn-ghost" style="margin-bottom:16px;padding:8px 16px;font-size:13px" onclick="openReviewCabinet('queue')">← К очереди</button>
+    <button class="btn btn-ghost" style="margin-bottom:16px;padding:8px 16px;font-size:13px" onclick="backFromFullWork()">← Назад</button>
+    <button class="btn btn-ghost" style="margin-bottom:16px;margin-left:8px;padding:8px 16px;font-size:13px" onclick="copyWorkLink('${enrollmentId}','${blockId}',this)">🔗 Скопировать ссылку</button>
     <div class="fw-header">
       <div>
         <h1 style="font-size:26px;margin:0">${esc(full.teacher||'—')}</h1>
