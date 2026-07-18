@@ -746,10 +746,9 @@ function renderLessonAsTeacher(d){
             <div style="font-size:12px;color:var(--gray);margin-bottom:4px">Отправлено ${fmt(s.submitted_at)}</div>
             ${rich ? `<div class="fw-answer">${a.html}</div>`
               : text ? `<div class="fw-answer" style="white-space:pre-wrap">${esc(text)}</div>`
-              : s.storage_path ? '<div class="note">Ответ прикреплён файлом.</div>'
+              : (s.storage_path || (a.files && a.files.length)) ? '<div class="note">Ответ прикреплён файлом.</div>'
               : '<div class="note">Пустой ответ.</div>'}
-            ${s.storage_path ? `<div style="margin-top:8px"><button class="btn btn-ghost" style="padding:9px 18px;font-size:13px"
-                onclick="openSubmissionFile('${esc(s.storage_path)}', this)">📎 Открыть файл</button></div>` : ''}
+            ${renderAttachments(a, s)}
           </div>`;
         }).join('') : '<div class="note warn">Преподаватель ничего не прислал.</div>'}
       </div>`;
@@ -2055,7 +2054,7 @@ function renderHomeworkWork(){
       const vals = Object.values(res);
       const ok = vals.filter(v => v === true).length;
       bodyHtml = `<div class="fw-answer">Тест выполнен автоматически: <b>${ok} из ${vals.length}</b> верно.</div>`;
-    } else if (s.storage_path) {
+    } else if (s.storage_path || (a.files && a.files.length)) {
       bodyHtml = '<div class="note">Ответ прикреплён файлом.</div>';
     } else {
       bodyHtml = '<div class="note">Пустой ответ.</div>';
@@ -2067,8 +2066,7 @@ function renderHomeworkWork(){
         <span style="font-size:12px;color:var(--gray)">${when}</span>
       </div>
       ${bodyHtml}
-      ${s.storage_path ? `<div style="margin-top:10px"><button class="btn btn-ghost" style="padding:9px 18px;font-size:13px"
-          onclick="openSubmissionFile('${esc(s.storage_path)}', this)">📎 Открыть прикреплённый файл</button></div>` : ''}
+      ${renderAttachments(a, s)}
     </div>`;
   }).join('') : '<div class="note warn">Преподаватель ничего не прислал по этому заданию.</div>';
 
@@ -2097,6 +2095,28 @@ function renderHomeworkWork(){
       <button class="btn" style="font-size:16px;padding:14px 32px" onclick="finishHomeworkReview('${enrollmentId}','${blockId}')">✅ Принять работу</button>
       <button class="btn btn-ghost" style="font-size:15px;padding:14px 26px" onclick="returnForRevision('${enrollmentId}','${blockId}')">↩ Вернуть на доработку</button>
     </div>`;
+}
+
+
+// вложения ответа: файлы лежат списком в answers.files [{path,name,size,type}]
+function renderAttachments(a, sub){
+  const files = (a && Array.isArray(a.files)) ? a.files.slice() : [];
+  if (sub && sub.storage_path && !files.some(f => f.path === sub.storage_path)) {
+    files.push({ path: sub.storage_path, name: 'Прикреплённый файл' });   // старый формат
+  }
+  if (!files.length) return '';
+  return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+    ${files.map(f => {
+      const kb = f.size ? (f.size > 1048576 ? (f.size/1048576).toFixed(1)+' МБ' : Math.round(f.size/1024)+' КБ') : '';
+      const icon = /\.(mp4|mov|webm)$/i.test(f.name||'') ? '🎬'
+                 : /\.(jpg|jpeg|png|webp|gif)$/i.test(f.name||'') ? '🖼️'
+                 : /\.pdf$/i.test(f.name||'') ? '📕'
+                 : /\.(doc|docx)$/i.test(f.name||'') ? '📘'
+                 : /\.(ppt|pptx)$/i.test(f.name||'') ? '📙' : '📄';
+      return `<button class="btn btn-ghost" style="padding:9px 16px;font-size:13px"
+        onclick="openSubmissionFile('${esc(f.path)}', this)">${icon} ${esc(f.name||'файл')}${kb?' · '+kb:''}</button>`;
+    }).join('')}
+  </div>`;
 }
 
 async function openSubmissionFile(path, btn){
