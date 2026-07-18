@@ -240,6 +240,8 @@ button{font-family:inherit;cursor:pointer}
 .fw-divider{font-family:'Fredoka',sans-serif;font-weight:600;font-size:16px;color:var(--purple-dark);margin:20px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--cream-dark)}
 .fw-sec{background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:16px 18px;margin-bottom:12px}
 .fw-section{background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:16px 18px;margin-bottom:12px}
+.fw-q{border-top:1px solid var(--cream);padding:10px 0}
+.fw-q:first-of-type{border-top:none}
 .fw-answer{background:#FBFAF7;border:1px solid var(--cream-dark);border-radius:10px;padding:14px 16px;font-size:14.5px;line-height:1.65;word-break:break-word}
 .fw-answer img{max-width:100%;border-radius:8px}
 .fw-answer table{border-collapse:collapse;max-width:100%}
@@ -665,6 +667,122 @@ async function openCourse(slug, fromRoute){
 // ============ Урок ============
 let currentLesson = null;
 // открыть урок из роутера: сначала грузим курс, если он ещё не загружен
+// ===== Урок глазами преподавателя (для методиста) =====
+async function openLessonAsTeacher(enrollmentId, lessonSlug){
+  show('review');
+  const body = document.getElementById('reviewBody');
+  body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Загружаю урок…</div>';
+  const { data, error } = await sb.rpc('learn_lesson_as_teacher',
+    { p_enrollment_id: enrollmentId, p_lesson_slug: lessonSlug });
+  if (error) { body.innerHTML = '<div class="note warn">'+esc(error.message)+'</div>'; return; }
+  renderLessonAsTeacher(data);
+}
+
+function renderLessonAsTeacher(d){
+  const body = document.getElementById('reviewBody');
+  const blocks = d.blocks || [];
+  const grades = d.grades || {};
+  const fmt = x => x ? new Date(x).toLocaleString('ru-RU') : '';
+
+  const blocksHtml = blocks.map(b => {
+    const p = b.payload || {};
+    const subs = b.submissions || [];
+
+    if (b.type === 'video') {
+      return `<div class="fw-section"><b style="font-size:15px">🎬 ${esc(p.title || 'Видео')}</b>
+        <div style="font-size:13px;color:var(--gray);margin-top:6px">Запись лекции — преподаватель смотрел этот блок.</div></div>`;
+    }
+
+    if (b.type === 'text') {
+      return `<div class="fw-section">
+        <button class="fw-toggle" onclick="const x=this.nextElementSibling;x.style.display=x.style.display==='none'?'block':'none';this.textContent=x.style.display==='none'?'📖 Показать конспект':'📖 Скрыть конспект'">📖 Показать конспект</button>
+        <div style="display:none" class="fw-answer">${p.html || ''}</div></div>`;
+    }
+
+    if (b.type === 'quiz') {
+      const qs = p.questions || [];
+      const sub = subs[0];
+      const a = (sub && sub.answers) || {};
+      const res = a.__results || {};
+      const answered = Object.keys(a).filter(k => k !== '__results').length;
+      const ok = Object.values(res).filter(v => v === true).length;
+      return `<div class="fw-section">
+        <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+          <b style="font-size:15px">📝 Тест по лекции</b>
+          <span class="fw-auto">${sub ? `${ok} из ${qs.length} верно` : 'не проходил'}</span>
+        </div>
+        ${!sub ? '<div class="note">Тест не пройден.</div>' : qs.map((q, qi) => {
+          const given = a[qi];
+          const isOk = res[qi] === true;
+          const chosen = Array.isArray(given)
+            ? given.map(i => (q.options || [])[i]).filter(Boolean)
+            : (given != null ? [String(given)] : []);
+          if (q.type === 'text') {
+            return `<div class="fw-q">
+              <div style="font-weight:700;font-size:14px">${qi+1}. ${esc(q.q)}</div>
+              <div class="fw-answer" style="margin-top:6px;white-space:pre-wrap">${esc(chosen[0] || '—')}</div></div>`;
+          }
+          return `<div class="fw-q">
+            <div style="font-weight:700;font-size:14px">${qi+1}. ${esc(q.q)} <span style="color:${isOk?'#15803D':'var(--red)'}">${isOk?'✓':'✗'}</span></div>
+            <div style="font-size:13.5px;margin-top:4px">Ответ: <b>${chosen.length?esc(chosen.join(', ')):'—'}</b></div>
+            ${!isOk && q.correct ? `<div style="font-size:13px;color:var(--gray);margin-top:2px">Верно: ${esc((q.correct||[]).map(i=>(q.options||[])[i]).filter(Boolean).join(', '))}</div>` : ''}
+          </div>`;
+        }).join('')}
+      </div>`;
+    }
+
+    if (b.type === 'task') {
+      return `<div class="fw-section">
+        <b style="font-size:15px">📋 Домашнее задание</b>
+        <div style="margin:8px 0">
+          <button class="fw-toggle" onclick="const x=this.nextElementSibling;x.style.display=x.style.display==='none'?'block':'none';this.textContent=x.style.display==='none'?'📄 Показать текст задания':'📄 Скрыть текст задания'">📄 Показать текст задания</button>
+          <div style="display:none" class="fw-tasktext">${p.html || ''}</div>
+        </div>
+        ${subs.length ? subs.map(s => {
+          const a = s.answers || {};
+          const rich = a.html && String(a.html).trim();
+          const text = !rich && (a.text || a.answer) ? String(a.text || a.answer) : '';
+          return `<div style="margin-top:10px">
+            <div style="font-size:12px;color:var(--gray);margin-bottom:4px">Отправлено ${fmt(s.submitted_at)}</div>
+            ${rich ? `<div class="fw-answer">${a.html}</div>`
+              : text ? `<div class="fw-answer" style="white-space:pre-wrap">${esc(text)}</div>`
+              : s.storage_path ? '<div class="note">Ответ прикреплён файлом.</div>'
+              : '<div class="note">Пустой ответ.</div>'}
+            ${s.storage_path ? `<div style="margin-top:8px"><button class="btn btn-ghost" style="padding:9px 18px;font-size:13px"
+                onclick="openSubmissionFile('${esc(s.storage_path)}', this)">📎 Открыть файл</button></div>` : ''}
+          </div>`;
+        }).join('') : '<div class="note warn">Преподаватель ничего не прислал.</div>'}
+      </div>`;
+    }
+
+    if (b.type === 'exam') {
+      return `<div class="fw-section">
+        <b style="font-size:15px">🧪 Пробник</b>
+        <div style="font-size:13.5px;color:var(--gray);margin-top:6px">Ответы пробника удобнее смотреть на экране проверки — там баллы и записи по каждому заданию.</div>
+        <div style="margin-top:10px"><button class="btn" style="padding:10px 20px;font-size:14px"
+          onclick="openFullWork('${d.enrollment_id}','${b.id}','progress')">Открыть работу для проверки →</button></div>
+      </div>`;
+    }
+
+    return '';
+  }).join('');
+
+  const status = d.done_at
+    ? `<span class="tp-flag ok">✅ сдан ${new Date(d.done_at).toLocaleDateString('ru-RU')}</span>`
+    : d.started_at ? '<span class="tp-flag warn">🔸 в процессе</span>' : '<span class="tp-flag">не начат</span>';
+
+  body.innerHTML = `
+    <button class="btn btn-ghost" style="margin-bottom:16px;padding:8px 16px;font-size:13px" onclick="backFromFullWork()">← Назад</button>
+    <h1 style="font-size:24px;margin-bottom:4px">${esc(d.lesson || '')}</h1>
+    <p style="color:var(--gray);margin-bottom:8px">${esc(d.teacher || '')} · ${esc(d.course || '')}</p>
+    <div style="margin-bottom:18px;display:flex;gap:8px;flex-wrap:wrap">${status}
+      ${d.revision_open ? '<span class="tp-flag warn">✏️ на доработке</span>' : ''}
+      ${d.exam_reviewed ? '<span class="tp-flag ok">проверено</span>' : ''}</div>
+    <div class="note" style="margin-bottom:16px">👁 Урок показан так, как его видел преподаватель, вместе с его ответами.</div>
+    ${blocksHtml}`;
+}
+
+// ===== Урок глазами преподавателя — конец =====
 async function openLessonRoute(courseSlug, lessonSlug){
   if (currentCourse !== courseSlug || !currentCourseData) {
     currentCourse = courseSlug;
@@ -809,8 +927,8 @@ function renderProgressOverview(rows){
                       <span>${done?'✅':(ls.started_at?'🔸':'⚪️')} ${esc(ls.title)}${ls.has_exam?' 📝':''}${ls.pending?' <span class="tp-flag warn" style="font-size:10.5px;padding:2px 7px">на проверке</span>':''}</span>
                       <span style="display:flex;align-items:center;gap:10px;white-space:nowrap">
                         <span style="color:var(--gray);font-size:11.5px">${done?dd:(ls.started_at?'начат':'не начат')}</span>
-                        ${ls.has_work && ls.block_id ? `<button class="btn btn-ghost" style="padding:5px 12px;font-size:11.5px"
-                          onclick="openWorkTab('${c.enrollment_id}','${ls.block_id}',event)">работа →</button>` : ''}
+                        ${ls.has_work ? `<button class="btn btn-ghost" style="padding:5px 12px;font-size:11.5px"
+                          onclick="event.stopPropagation();openLessonAsTeacher('${c.enrollment_id}','${ls.slug}')">смотреть урок →</button>` : ''}
                       </span>
                     </div>`;
                   }).join('')}
