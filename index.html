@@ -2896,11 +2896,24 @@ function countdown(stage, sec, title, sub, hint){
 }
 
 async function finishSpeaking(blockId, task, mime, stage){
-  const blobs = window.__recBlobs[task.id] || [];
-  // склеиваем серию в один файл (простая конкатенация контейнеров webm работает для воспроизведения последовательно;
-  //  для надёжности грузим каждый ответ отдельным файлом с индексом)
-  stage.innerHTML = `<div class="rec-box"><div style="font-weight:800">⬆ Загружаю запись…</div></div>`;
+  // берём только непустые куски: пустая запись = микрофон не сработал
+  const blobs = (window.__recBlobs[task.id] || []).filter(b => b && b.size > 1000);
   if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+
+  // ЗАЩИТА: без файла сдачу не создаём — иначе препод думает, что сдал, а записи нет
+  if (!blobs.length) {
+    stage.innerHTML = `
+      <div class="note err"><b>Запись не получилась — ответ не отправлен.</b><br>
+      Микрофон не записал звук. Проверьте, что браузеру разрешён доступ к микрофону
+      (значок замка слева в адресной строке), и запишите ответ заново.</div>
+      <div style="margin-top:10px">
+        <button class="btn" style="padding:10px 20px;font-size:14px"
+          onclick='startSpeaking("${blockId}", ${JSON.stringify(task).replace(/'/g,"&#39;")})'>🎤 Записать заново</button>
+      </div>`;
+    return;
+  }
+
+  stage.innerHTML = `<div class="rec-box"><div style="font-weight:800">⬆ Загружаю запись…</div></div>`;
 
   try {
     const { data:{ session } } = await sb.auth.getSession();
@@ -2913,6 +2926,7 @@ async function finishSpeaking(blockId, task, mime, stage){
       if (upErr) throw upErr;
       paths.push(path);
     }
+    if (!paths.length) throw new Error('файл не загрузился');
     const { error } = await sb.rpc('learn_submit_exam', {
       p_block_id: blockId, p_section: 'speaking_' + task.id, p_kind: 'audio',
       p_answers: {}, p_storage: paths[0], p_mime: mime,
@@ -2991,6 +3005,7 @@ function renderExam(b){
 function initExamTimer(blockId, timer){
   if (examTimerInterval) { clearInterval(examTimerInterval); examTimerInterval = null; }
   if (!timer) return;
+  if (timer.expired) return;   // время уже истекло — таймер не нужен
   const deadline = new Date(timer.deadline_at).getTime();
   const serverOffset = Date.now() - new Date(timer.server_now).getTime();
   const tick = () => {
@@ -3020,6 +3035,13 @@ async function startExam(blockId){
 }
 
 async function onExamExpire(blockId){
+  // обрабатываем истечение времени ровно один раз:
+  // иначе автосдача → перерисовка → таймер снова видит 0 → бесконечный цикл,
+  // из-за которого страница дёргается и её невозможно прокрутить
+  window.__expiredHandled = window.__expiredHandled || {};
+  if (window.__expiredHandled[blockId]) return;
+  window.__expiredHandled[blockId] = true;
+
   await autoSubmitWritten(blockId);
   const box = document.getElementById('exam-' + blockId);
   if (box) {
@@ -3029,7 +3051,9 @@ async function onExamExpire(blockId){
       if (el.hasAttribute('contenteditable')) el.setAttribute('contenteditable', 'false');
     });
   }
-  refreshLesson();
+  const tbox = document.getElementById('exam-timer-' + blockId);
+  if (tbox) tbox.innerHTML = '⏱ время письменной части истекло';
+  // урок НЕ перерисовываем — устная часть остаётся доступной
 }
 
 async function autoSubmitWritten(blockId){
@@ -3553,12 +3577,101 @@ async function submitTask(blockId){
   }
 }
 
+// ===== Проверка заполненности перед завершением урока =====
+// Собирает список секций, по которым нет ответа: ни сохранённого, ни введённого на экране.
+function collectMissingSections(){
+  const missing = [];
+  const blocks = (currentLesson && currentLesson.blocks) || [];
+  for (const b of blocks) {
+    if (b.type !== 'exam') continue;
+    const st = b.exam_state || {};
+    const secs = (b.payload && b.payload.sections) || [];
+    secs.forEach((sec, si) => {
+      const kind = sec.kind;
+      if (kind === 'audio') return;                     // прослушивание, отвечать нечего
+      const key = secKey(sec, si);
+      const saved = st[key];
+      const title = sec.title || sec.divider || 'Задание';
+
+      if (kind === 'speaking') {
+        // у устного каждое задание отдельно
+        (sec.tasks || []).forEach(t => {
+          const s = st['speaking_' + t.id];
+          const hasRec = s && (s.storage_path || (s.meta && s.meta.parts && s.meta.parts.length));
+          if (!hasRec) missing.push(t.label || ('Устное задание ' + t.id));
+        });
+        return;
+      }
+
+      // есть сохранённый непустой ответ?
+      let hasSaved = false;
+      if (saved) {
+        const a = saved.answers || {};
+        if (kind === 'writing' || kind === 'reflection') {
+          hasSaved = !!(saved.storage_path || (a.text && String(a.text).trim()));
+        } else {
+          hasSaved = Object.entries(a).some(([k, v]) =>
+            k !== '__results' && v !== '' && v !== null &&
+            !(Array.isArray(v) && v.length === 0));
+        }
+      }
+      if (hasSaved) return;
+
+      // ответа нет — проверим, введено ли что-то прямо сейчас на экране
+      let typed = false;
+      if (kind === 'auto_quiz') {
+        const box = document.getElementById('exq-' + b.id + '-' + si);
+        typed = !!(box && box.querySelector('input:checked'));
+      } else if (kind === 'exact_input') {
+        const box = document.getElementById('exe-' + b.id + '-' + si);
+        if (box) typed = [...box.querySelectorAll('.exe-field, .seq-box')].some(f => f.value.trim());
+      } else if (kind === 'writing') {
+        const ta = document.getElementById(`wr-ta-${b.id}-${key}`);
+        typed = !!(ta && ta.value.trim()) || !!wrPhotoFiles[b.id + key];
+      } else if (kind === 'reflection') {
+        const ta = document.getElementById('refl-' + b.id);
+        typed = !!(ta && ta.value.trim());
+      }
+      if (!typed) missing.push(title);
+    });
+  }
+  return missing;
+}
+
+function showMissingConfirm(missing){
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.className = 'cd-overlay';
+    ov.innerHTML = `<div class="cd-modal" style="max-width:520px">
+      <h2 style="font-size:20px;margin:0 0 10px">Не всё заполнено</h2>
+      <p style="color:var(--gray);font-size:14px;margin-bottom:12px">
+        По этим заданиям нет ответа. Если завершить сейчас, они уйдут на проверку пустыми.</p>
+      <div class="md-list" style="margin-bottom:16px">
+        ${missing.map(m => `<div class="md-item"><span>⚠️ ${esc(m)}</span></div>`).join('')}
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn" id="mc-back" style="padding:12px 22px">Вернуться и заполнить</button>
+        <button class="btn btn-ghost" id="mc-go" style="padding:12px 22px">Всё равно завершить</button>
+      </div>
+    </div>`;
+    document.body.appendChild(ov);
+    ov.querySelector('#mc-back').onclick = () => { ov.remove(); resolve(false); };
+    ov.querySelector('#mc-go').onclick  = () => { ov.remove(); resolve(true); };
+  });
+}
+
 let __finishing = false;
 async function finishLesson(){
   if (__finishing) return;   // защита от повторных кликов
   __finishing = true;
   // защита от потери: досохраняем все заполненные секции пробника
   await autosaveAllExamSections();
+  // предупреждаем, если что-то осталось незаполненным
+  const missing = collectMissingSections();
+  if (missing.length) {
+    const go = await showMissingConfirm(missing);
+    if (!go) { __finishing = false; return; }
+  }
   const { data, error } = await sb.rpc('learn_complete_lesson',
     { p_course_slug: currentCourse, p_lesson_slug: currentLesson.slug });
   if (error) { alert('Не получилось: ' + error.message); __finishing = false; return; }
