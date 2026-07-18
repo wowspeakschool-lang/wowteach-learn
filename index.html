@@ -3073,7 +3073,7 @@ function renderSection(blockId, sec, si, st){
         ${(sec.quiz?.questions||[]).map((q, qi) => renderExamQuestion(blockId + '-' + si, q, qi, null, s)).join('')}
       </div>
       ${saved ? '<div class="note ok" style="margin-top:12px">✓ Ответ сохранён. Результат появится после проверки.</div>' : ''}
-      <button class="btn" style="margin-top:14px" onclick="submitExamQuiz('${blockId}', ${si})">${saved?'Изменить ответ':'Сохранить ответ'}</button>`);
+      <button class="btn" style="margin-top:14px" onclick="submitExamQuiz('${blockId}', ${si}, this)">${saved?'Изменить ответ':'Сохранить ответ'}</button>`);
   }
   if (kind === 'exact_input') {
     const sk = 'exact_' + si;
@@ -3110,7 +3110,7 @@ function renderSection(blockId, sec, si, st){
         }).join('')}
       </div>
       ${saved ? '<div class="note ok" style="margin-top:12px">✓ Ответ сохранён. Результат появится после проверки.</div>' : ''}
-      <button class="btn" style="margin-top:14px" onclick="submitExamExact('${blockId}', ${si})">${saved?'Изменить ответ':'Сохранить ответ'}</button>`);
+      <button class="btn" style="margin-top:14px" onclick="submitExamExact('${blockId}', ${si}, this)">${saved?'Изменить ответ':'Сохранить ответ'}</button>`);
   }
   if (kind === 'writing') {
     const key = 'writing_' + si;
@@ -3320,14 +3320,36 @@ function collectExam(prefix, blockId, selector){
   });
   return answers;
 }
-async function submitExamQuiz(blockId, si){
+// локальное подтверждение сохранения секции (без перерисовки урока)
+function markSectionSaved(anchorId, btn, text){
+  const el = document.getElementById(anchorId);
+  const host = el ? (el.closest('.sec-body') || el.parentElement) : null;
+  if (host) {
+    let ok = host.querySelector('.sec-saved');
+    if (!ok) {
+      ok = document.createElement('div');
+      ok.className = 'note ok sec-saved';
+      ok.style.marginTop = '10px';
+      host.appendChild(ok);
+    }
+    ok.textContent = '✅ ' + (text || 'Ответ сохранён');
+  }
+  if (btn) {
+    const prev = btn.textContent;
+    btn.textContent = '✅ Сохранено';
+    setTimeout(() => { btn.textContent = prev.includes('Изменить') ? prev : 'Изменить ответ'; }, 1800);
+  }
+}
+
+async function submitExamQuiz(blockId, si, btn){
   const answers = collectExam('exq-', blockId + '-' + si);
   const { error } = await sb.rpc('learn_submit_exam',
     { p_block_id: blockId, p_section: 'quiz_' + si, p_kind: 'quiz', p_answers: answers, p_meta: { si } });
-  if (error) { alert(error.message); return; }
-  refreshLesson();
+  if (error) { alert('Не сохранилось: ' + error.message); return; }
+  // НЕ перерисовываем урок: это стирало бы несохранённый ввод в других секциях
+  markSectionSaved('exq-' + blockId + '-' + si, btn);
 }
-async function submitExamExact(blockId, si){
+async function submitExamExact(blockId, si, btn){
   const box = document.getElementById('exe-' + blockId + '-' + si);
   const answers = {};
   // обычные поля (word)
@@ -3339,8 +3361,9 @@ async function submitExamExact(blockId, si){
   });
   const { error } = await sb.rpc('learn_submit_exam',
     { p_block_id: blockId, p_section: 'exact_' + si, p_kind: 'exact', p_answers: answers, p_meta: { si } });
-  if (error) { alert(error.message); return; }
-  refreshLesson();
+  if (error) { alert('Не сохранилось: ' + error.message); return; }
+  // НЕ перерисовываем урок: это стирало бы несохранённый ввод в других секциях
+  markSectionSaved('exe-' + blockId + '-' + si, btn);
 }
 
 // автопереход к следующей клетке при вводе цифры
@@ -3386,7 +3409,7 @@ async function submitWriting(blockId, key){
           p_answers: { text }, p_meta: { via: 'typed', words: text.split(/\s+/).length } });
       if (error) throw error;
     }
-    refreshLesson();
+    markSectionSaved(`wr-ta-${blockId}-${key}`, null, 'Ответ отправлен на проверку');
   } catch(e){ alert('Не получилось: ' + (e.message||e)); }
 }
 async function submitReflection(blockId){
