@@ -1903,6 +1903,75 @@ function taskText(sec){
   </div>`;
 }
 
+// Экран проверки обычного задания урока (домашки): текст задания + ответ + оценка
+function renderHomeworkWork(){
+  const { full, enrollmentId, blockId } = window.__fullWork;
+  const body = document.getElementById('reviewBody');
+  const p = full.payload || {};
+  const subs = full.submissions || {};
+  const entries = Object.entries(subs);
+
+  const answersHtml = entries.length ? entries.map(([key, s]) => {
+    const a = s.answers || {};
+    const text = a.text || a.answer || '';
+    const when = s.submitted_at ? new Date(s.submitted_at).toLocaleString('ru-RU') : '';
+    return `<div class="fw-section">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+        <b style="font-size:15px">Ответ преподавателя</b>
+        <span style="font-size:12px;color:var(--gray)">${when}</span>
+      </div>
+      ${text ? `<div class="fw-answer" style="white-space:pre-wrap">${esc(text)}</div>`
+             : '<div class="note">Текстового ответа нет.</div>'}
+      ${s.storage_path ? `<div style="margin-top:10px"><button class="btn btn-ghost" style="padding:9px 18px;font-size:13px"
+          onclick="openSubmissionFile('${esc(s.storage_path)}', this)">📎 Открыть прикреплённый файл</button></div>` : ''}
+    </div>`;
+  }).join('') : '<div class="note warn">Преподаватель ничего не прислал по этому заданию.</div>';
+
+  body.innerHTML = `
+    <button class="btn btn-ghost" style="margin-bottom:16px;padding:8px 16px;font-size:13px" onclick="backFromFullWork()">← Назад</button>
+    <button class="btn btn-ghost" style="margin-bottom:16px;margin-left:8px;padding:8px 16px;font-size:13px" onclick="copyWorkLink('${enrollmentId}','${blockId}',this)">🔗 Скопировать ссылку</button>
+
+    <h1 style="font-size:26px;margin-bottom:4px">${esc(full.teacher || '—')}</h1>
+    <p style="color:var(--gray);margin-bottom:18px">${esc(full.course || '')} · ${esc(full.lesson || '')}</p>
+
+    ${p.html ? `<div style="margin-bottom:16px">
+      <button class="fw-toggle" onclick="const b=this.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';this.textContent=b.style.display==='none'?'📄 Показать текст задания':'📄 Скрыть текст задания'">📄 Показать текст задания</button>
+      <div style="display:none" class="fw-tasktext">${p.html}</div>
+    </div>` : ''}
+
+    ${answersHtml}
+
+    <div class="fw-section" style="margin-top:16px">
+      <b style="font-size:15px">Комментарий преподавателю</b>
+      <textarea id="hw-comment" placeholder="Что получилось, что доработать…"
+        oninput="this.style.height='auto';this.style.height=Math.max(130,this.scrollHeight+4)+'px'"
+        style="width:100%;min-height:130px;padding:12px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:14px;line-height:1.55;background:#FDFCF8;margin-top:10px;resize:vertical;font-family:inherit"></textarea>
+    </div>
+
+    <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn" style="font-size:16px;padding:14px 32px" onclick="finishHomeworkReview('${enrollmentId}','${blockId}')">✅ Принять работу</button>
+      <button class="btn btn-ghost" style="font-size:15px;padding:14px 26px" onclick="returnForRevision('${enrollmentId}','${blockId}')">↩ Вернуть на доработку</button>
+    </div>`;
+}
+
+async function openSubmissionFile(path, btn){
+  if (btn) { btn.disabled = true; btn.textContent = 'Открываю…'; }
+  const { data, error } = await sb.storage.from('learn-tasks').createSignedUrl(path, 3600);
+  if (btn) { btn.disabled = false; btn.textContent = '📎 Открыть прикреплённый файл'; }
+  if (error) { alert('Не удалось открыть файл: ' + error.message); return; }
+  window.open(data.signedUrl, '_blank', 'noopener');
+}
+
+async function finishHomeworkReview(enr, blk){
+  const comment = (document.getElementById('hw-comment')?.value || '').trim();
+  if (!confirm('Принять работу? Преподаватель получит уведомление, урок будет отмечен проверенным.')) return;
+  const { error } = await sb.rpc('learn_finish_review',
+    { p_enrollment_id: enr, p_block_id: blk, p_comment: comment || null });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  alert('✅ Работа принята.');
+  backFromFullWork();
+}
+
 function renderFullWork(){
   const { full, total, enrollmentId, blockId } = window.__fullWork;
   const body = document.getElementById('reviewBody');
@@ -1910,6 +1979,9 @@ function renderFullWork(){
   const subs = full.submissions || {};
   const grades = full.grades || {};
   const secs = p.sections || [];
+
+  // не пробник, а обычное задание урока (домашка) — секций нет
+  if (!secs.length) { renderHomeworkWork(); return; }
 
   let si = -1;
   const sectionsHtml = secs.map(sec => {
@@ -2076,10 +2148,10 @@ async function returnForRevision(enr, blk){
 
 async function finishReview(enr, blk){
   if (!confirm('Завершить проверку? Преподавателю уйдёт уведомление и письмо с результатом, работа откроется для просмотра.')) return;
-  const { error } = await sb.rpc('learn_finish_review', { p_enrollment_id: enr, p_block_id: blk });
+  const { error } = await sb.rpc('learn_finish_review', { p_enrollment_id: enr, p_block_id: blk, p_comment: null });
   if (error) { alert(error.message); return; }
   alert('Проверка завершена. Преподаватель уведомлён.');
-  openReviewCabinet('queue');
+  backFromFullWork();
 }
 
 // ===== Уведомления учителя =====
