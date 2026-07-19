@@ -564,6 +564,12 @@ function confirmLeave(){
 }
 
 function show(id, noScroll){
+  // уходим с урока — гасим таймер пробника, иначе он тикает в фоне
+  // и может сработать автосдачей, когда человек уже в другом разделе
+  if (id !== 'lesson' && examTimerInterval) {
+    clearInterval(examTimerInterval);
+    examTimerInterval = null;
+  }
   ['login','catalog','course','lesson','map','review'].forEach(k =>
     document.getElementById(k).style.display = k === id ? 'block' : 'none');
   if (!noScroll) window.scrollTo({ top: 0 });
@@ -901,9 +907,9 @@ function renderProgressOverview(rows){
               const dl = c.deadline ? new Date(c.deadline) : null;
               const overdue = dl && dl < Date.now() && !c.completed;
               let status;
-              if (c.completed) status = '<span class="tp-flag ok">✅ пройден</span>';
+              if (c.completed) status = '<span class="tp-flag ok">🎓 курс завершён</span>';
               else if (c.suspended) status = '<span class="tp-flag bad">🚫 приостановлен</span>';
-              else if (c.pending_review) status = '<span class="tp-flag warn">⏳ на проверке</span>';
+              else if (c.pending_review) status = '<span class="tp-flag warn">⏳ есть работы на проверке</span>';
               else status = '<span class="tp-flag">учится</span>';
               if (c.revision_open) status += ' <span class="tp-flag warn">✏️ на доработке</span>';
               return `<div class="tp-course">
@@ -930,9 +936,9 @@ function renderProgressOverview(rows){
                     const done = !!ls.done_at;
                     const dd = done ? new Date(ls.done_at).toLocaleDateString('ru-RU') : '';
                     return `<div class="tp-lesson">
-                      <span>${done?'✅':(ls.started_at?'🔸':'⚪️')} ${esc(ls.title)}${ls.has_exam?' 📝':''}${ls.pending?' <span class="tp-flag warn" style="font-size:10.5px;padding:2px 7px">на проверке</span>':''}</span>
+                      <span>${done?(ls.pending?'⏳':'✅'):(ls.started_at?'🔸':'⚪️')} ${esc(ls.title)}${ls.has_exam?' 📝':''}</span>
                       <span style="display:flex;align-items:center;gap:10px;white-space:nowrap">
-                        <span style="color:var(--gray);font-size:11.5px">${done?dd:(ls.started_at?'начат':'не начат')}</span>
+                        <span style="color:var(--gray);font-size:11.5px">${done?(ls.pending?'сдан '+dd+' · на проверке':'проверен · '+dd):(ls.started_at?'в процессе':'не начат')}</span>
                         ${ls.has_work ? `<button class="btn btn-ghost" style="padding:5px 12px;font-size:11.5px"
                           onclick="event.stopPropagation();openLessonAsTeacher('${c.enrollment_id}','${ls.slug}')">смотреть урок →</button>` : ''}
                       </span>
@@ -2094,6 +2100,11 @@ function renderHomeworkWork(){
   const p = full.payload || {};
   const subs = full.submissions || {};
   const entries = Object.entries(subs);
+  // максимум балла: задан в задании либо 100 по умолчанию
+  const hwMax = Number(p.max_score) > 0 ? Number(p.max_score) : 100;
+  const prev = (full.grades || {})['_task'] || {};
+  const hwScore = prev.score != null ? prev.score : hwMax;
+  const hwComment = prev.comment ? esc(prev.comment) : '';
 
   const answersHtml = entries.length ? entries.map(([key, s]) => {
     const a = s.answers || {};
@@ -2145,14 +2156,20 @@ function renderHomeworkWork(){
     ${answersHtml}
 
     <div class="fw-section" style="margin-top:16px">
-      <b style="font-size:15px">Комментарий преподавателю</b>
-      <textarea id="hw-comment" placeholder="Что получилось, что доработать…"
+      <b style="font-size:15px">Оценка работы</b>
+      <div style="font-size:12.5px;color:var(--gray);margin-top:4px">Шкала 0–${hwMax}. Если в уроке несколько заданий, оценка за урок — среднее по ним.</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
+        <input id="hw-score" type="number" min="0" max="${hwMax}" step="1" value="${hwScore}"
+          style="width:110px;padding:11px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:16px;font-weight:800;text-align:center;background:#FDFCF8;font-family:inherit">
+        <span style="font-size:15px;color:var(--gray)">из ${hwMax}</span>
+      </div>
+      <textarea id="hw-comment" placeholder="Комментарий преподавателю: что получилось, что доработать…"
         oninput="this.style.height='auto';this.style.height=Math.max(130,this.scrollHeight+4)+'px'"
-        style="width:100%;min-height:130px;padding:12px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:14px;line-height:1.55;background:#FDFCF8;margin-top:10px;resize:vertical;font-family:inherit"></textarea>
+        style="width:100%;min-height:130px;padding:12px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:14px;line-height:1.55;background:#FDFCF8;margin-top:12px;resize:vertical;font-family:inherit">${hwComment}</textarea>
     </div>
 
     <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn" style="font-size:16px;padding:14px 32px" onclick="finishHomeworkReview('${enrollmentId}','${blockId}')">✅ Принять работу</button>
+      <button class="btn" style="font-size:16px;padding:14px 32px" onclick="finishHomeworkReview('${enrollmentId}','${blockId}',${hwMax})">✅ Принять и выставить балл</button>
       <button class="btn btn-ghost" style="font-size:15px;padding:14px 26px" onclick="returnForRevision('${enrollmentId}','${blockId}')">↩ Вернуть на доработку</button>
     </div>`;
 }
@@ -2187,13 +2204,21 @@ async function openSubmissionFile(path, btn){
   window.open(data.signedUrl, '_blank', 'noopener');
 }
 
-async function finishHomeworkReview(enr, blk){
+async function finishHomeworkReview(enr, blk, max){
   const comment = (document.getElementById('hw-comment')?.value || '').trim();
-  if (!confirm('Принять работу? Преподаватель получит уведомление, урок будет отмечен проверенным.')) return;
+  const raw = (document.getElementById('hw-score')?.value || '').trim();
+  const score = raw === '' ? null : Number(raw);
+  if (score == null || isNaN(score) || score < 0 || score > max) {
+    alert(`Поставьте балл от 0 до ${max}.`); return;
+  }
+  if (!confirm(`Принять работу с баллом ${score} из ${max}?\n\nПреподаватель получит уведомление с оценкой и комментарием.`)) return;
+  const { error: gErr } = await sb.rpc('learn_grade_homework',
+    { p_enrollment_id: enr, p_block_id: blk, p_score: score, p_comment: comment || null, p_max_score: max });
+  if (gErr) { alert('Не получилось: ' + gErr.message); return; }
   const { error } = await sb.rpc('learn_finish_review',
     { p_enrollment_id: enr, p_block_id: blk, p_comment: comment || null });
-  if (error) { alert('Не получилось: ' + error.message); return; }
-  alert('✅ Работа принята.');
+  if (error) { alert('Балл сохранён, но уведомление не ушло: ' + error.message); }
+  alert(`✅ Работа принята. Балл: ${score} из ${max}`);
   backFromFullWork();
 }
 
@@ -2727,10 +2752,42 @@ function renderLesson(slug, keepScroll){
   loadExamResults(l);
 }
 
+
+// оценка за задание урока-лекции: показываем преподавателю над заданием
+async function loadHomeworkGrade(l){
+  const taskBlock = (l.blocks||[]).find(bl => bl.type === 'task');
+  if (!taskBlock) return;
+  const { data } = await sb.rpc('learn_my_lesson_grade',
+    { p_course_slug: currentCourse, p_lesson_slug: l.slug });
+  const host = document.getElementById('task-result-' + taskBlock.id)
+            || document.getElementById('exam-result-' + taskBlock.id);
+  if (!host) return;
+  if (!data || !data.graded) {
+    if (l.done_at) {
+      host.innerHTML = `<div class="exam-pending-banner">
+        <div style="font-size:13px;font-weight:800;color:#B45309;text-transform:uppercase;letter-spacing:.5px">⏳ На проверке</div>
+        <div style="font-size:14px;margin-top:6px;color:var(--ink)">Работа отправлена методисту. Оценка и комментарий появятся здесь после проверки.</div>
+      </div>`;
+    }
+    return;
+  }
+  const tasks = (data.tasks || []).filter(t => t.score != null);
+  const many = tasks.length > 1;
+  host.innerHTML = `<div class="exam-result-banner">
+    <div style="font-size:13px;font-weight:800;color:#15803D;text-transform:uppercase;letter-spacing:.5px">✅ Работа проверена</div>
+    <div style="font-size:19px;margin-top:6px">Оценка за урок: <b>${data.average}</b> из 100${many?` <span style="font-size:14px;color:var(--gray)">— среднее по ${tasks.length} ${plural(tasks.length,'заданию','заданиям','заданиям')}</span>`:''}</div>
+    ${tasks.map(t => `
+      <div style="margin-top:12px">
+        ${many?`<div style="font-size:13.5px;font-weight:700">${esc(t.title)} — ${t.score} из ${t.max}</div>`:''}
+        ${t.comment ? `<div class="ebd-comment"><b style="color:var(--purple-dark)">💬 Комментарий методиста:</b><br>${esc(t.comment)}</div>` : ''}
+      </div>`).join('')}
+  </div>`;
+}
+
 async function loadExamResults(l){
   if (window.__isEditor) return;   // результат — для учителя
   const examBlock = (l.blocks||[]).find(bl => bl.type === 'exam');
-  if (!examBlock) return;
+  if (!examBlock) { loadHomeworkGrade(l); return; }
   const holder = document.getElementById('exam-result-' + examBlock.id);
   if (!holder) return;
   const { data } = await sb.rpc('learn_exam_result', { p_block_id: examBlock.id });
@@ -2838,6 +2895,7 @@ function renderBlock(b){
     edFiles[b.id] = files.map(f => ({ ...f, uploaded: true }));
     const locked = s?.review_status === 'pending' || s?.review_status === 'approved';
     return `<div class="block"><div class="qbox">
+      <div id="task-result-${b.id}"></div>
       <h3>✍️ Задание</h3>
       <div class="block-text" style="margin-bottom:16px">${p.html || ''}</div>
 
@@ -3259,15 +3317,17 @@ async function finishSpeaking(blockId, task, mime, stage){
     markLocalSubmission(blockId, 'speaking_' + task.id,
       { storage_path: paths[0], meta: { task: task.id, parts: paths, count: paths.length }, review_status: 'pending' });
     // НЕ перерисовываем урок целиком: это стирало бы незаполненные секции.
-    // Показываем результат локально и даём перезаписать.
-    stage.innerHTML = `
-      <div class="note ok">✅ Запись отправлена методисту.</div>
-      <div style="margin-top:10px">
-        <button class="btn btn-ghost" style="padding:9px 18px;font-size:13.5px"
-          onclick='startSpeaking("${blockId}", ${JSON.stringify(task).replace(/'/g,"&#39;")})'>🔄 Перезаписать</button>
-      </div>`;
+    // Запись дошла — перезапись не предлагаем, чтобы не переписывали случайно.
+    stage.innerHTML = `<div class="note ok">✅ Запись отправлена методисту.</div>`;
   } catch(e) {
-    stage.innerHTML = `<div class="note err">Не удалось загрузить запись: ${esc(e.message||e)}</div>`;
+    // файл не долетел — вот здесь перезапись нужна
+    stage.innerHTML = `
+      <div class="note err"><b>Запись не загрузилась.</b><br>${esc(e.message||e)}<br>
+      Проверьте интернет и запишите ответ заново — сейчас ответ не сохранён.</div>
+      <div style="margin-top:10px">
+        <button class="btn" style="padding:10px 20px;font-size:14px"
+          onclick='startSpeaking("${blockId}", ${JSON.stringify(task).replace(/'/g,"&#39;")})'>🎤 Записать заново</button>
+      </div>`;
   }
 }
 
@@ -3830,7 +3890,9 @@ async function submitExact(blockId){
   });
   const { data, error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: answers });
   if (error) { alert('Не получилось: ' + error.message); return; }
-  clearDirty(); await refreshLesson();
+  clearDirty();
+  markLocalSubmission(blockId, 'block', { answers });
+  await refreshLesson();
 }
 
 async function submitQuiz(blockId){
@@ -3844,7 +3906,9 @@ async function submitQuiz(blockId){
   });
   const { data, error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: answers });
   if (error) { alert('Не получилось: ' + error.message); return; }
-  clearDirty(); await refreshLesson();
+  clearDirty();
+  markLocalSubmission(blockId, 'block', { answers });
+  await refreshLesson();
 }
 
 // ===== Редактор заданий =====
@@ -3917,7 +3981,18 @@ async function submitTask(blockId){
     const { error } = await sb.rpc('learn_submit_block',
       { p_block_id: blockId, p_answers: { html, files } });
     if (error) throw error;
-    clearDirty(); await refreshLesson();
+    clearDirty();
+    markLocalSubmission(blockId, 'task', { answers: { html, files }, review_status: 'pending' });
+    // НЕ перерисовываем урок: это стирало бы набранный ответ
+    if (btn) { btn.disabled = false; btn.textContent = '✅ Отправлено'; }
+    const host = document.getElementById('taskBtn-' + blockId)?.parentElement;
+    if (host && !host.querySelector('.task-sent')) {
+      const ok = document.createElement('div');
+      ok.className = 'note ok task-sent';
+      ok.style.marginTop = '10px';
+      ok.innerHTML = '✅ Ответ отправлен методисту. Урок засчитан — можно дополнить и отправить ещё раз, пока идёт проверка.';
+      host.appendChild(ok);
+    }
   } catch (e) {
     alert('Не получилось отправить: ' + (e.message || e));
     if (btn) { btn.disabled = false; btn.textContent = 'Отправить на проверку'; }
@@ -4041,6 +4116,10 @@ async function finishLesson(){
     __finishing = false;
     return;
   }
+  // урок сдан — таймер письменной части больше не нужен
+  if (examTimerInterval) { clearInterval(examTimerInterval); examTimerInterval = null; }
+  const tb = document.querySelector('.exam-timer');
+  if (tb) tb.remove();
   // мини-опрос (модалка показывается один раз)
   showLessonFeedback(currentCourse, currentLesson.slug, data.course_done);
 }
