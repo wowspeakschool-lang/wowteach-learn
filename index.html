@@ -657,16 +657,26 @@ async function openCourse(slug, fromRoute){
       ${data.deadline_at && !data.completed_at ? ` · до ${new Date(data.deadline_at).toLocaleDateString('ru-RU')}` : ''}
     </div>
 
-    ${(data.lessons||[]).map((l, i) => `
-      <div class="lesson-item ${l.done_at?'done':''} ${l.locked?'locked':''} ${(!l.done_at && l.pending_review)?'pending':''}"
+    ${(data.lessons||[]).map((l, i) => {
+      // статус урока: доработка → на проверке → пройден → в процессе
+      const rev = !!data.revision_open && !!l.done_at;
+      const pend = !rev && !!l.pending_review;
+      const done = !!l.done_at && !rev && !pend;
+      const cls = rev ? 'pending' : done ? 'done' : pend ? 'pending' : '';
+      const icon = l.locked ? '🔒' : rev ? '✏️' : pend ? '⏳' : done ? '✓' : (i+1);
+      const chip = l.locked ? '<span style="font-size:12px;color:var(--gray)">пройдите предыдущий</span>'
+        : rev ? '<span class="lesson-chip-pending">на доработке</span>'
+        : pend ? '<span class="lesson-chip-pending">на проверке</span>'
+        : '<span style="color:var(--purple);font-weight:800">→</span>';
+      return `
+      <div class="lesson-item ${cls} ${l.locked?'locked':''}"
            onclick="${l.locked ? '' : `go('lesson/${currentCourse}/${l.slug}')`}">
-        <div class="n">${l.done_at ? '✓' : (l.locked ? '🔒' : (l.pending_review ? '⏳' : i+1))}</div>
+        <div class="n">${icon}</div>
         <div class="t"><b>${esc(l.title)}</b>
           <span>${esc(l.summary || '')}${l.score != null ? ` · результат ${l.score}%` : ''}</span></div>
-        ${l.locked ? '<span style="font-size:12px;color:var(--gray)">пройдите предыдущий</span>'
-          : (!l.done_at && l.pending_review) ? '<span class="lesson-chip-pending">на проверке</span>'
-          : '<span style="color:var(--purple);font-weight:800">→</span>'}
-      </div>`).join('')}
+        ${chip}
+      </div>`;
+    }).join('')}
   `;
 }
 
