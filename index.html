@@ -3373,6 +3373,26 @@ async function finishSpeaking(blockId, task, mime, stage){
     // НЕ перерисовываем урок целиком: это стирало бы незаполненные секции.
     // Запись дошла — перезапись не предлагаем, чтобы не переписывали случайно.
     stage.innerHTML = `<div class="note ok">✅ Запись отправлена методисту.</div>`;
+    // сразу показываем записанную дорожку — можно переслушать, не перезагружая страницу
+    try {
+      const holder = document.getElementById(`sp-player-${blockId}-${task.id}`)
+                  || (() => {
+                       const d = document.createElement('div');
+                       d.id = `sp-player-${blockId}-${task.id}`;
+                       d.style.marginTop = '12px';
+                       stage.parentElement.insertBefore(d, stage);
+                       return d;
+                     })();
+      const urls = [];
+      for (const p of paths) {
+        const { data: sd } = await sb.storage.from('learn-tasks').createSignedUrl(p, 3600);
+        if (sd?.signedUrl) urls.push(sd.signedUrl);
+      }
+      if (urls.length) {
+        holder.innerHTML = '<div style="font-size:12.5px;color:var(--gray);margin-bottom:6px">🎧 Ваша запись (можно переслушать):</div>'
+          + urls.map(u => `<audio controls preload="metadata" src="${u}" style="width:100%;margin-bottom:6px"></audio>`).join('');
+      }
+    } catch(_){}
   } catch(e) {
     // файл не долетел — вот здесь перезапись нужна
     stage.innerHTML = `
@@ -3945,8 +3965,9 @@ async function submitExact(blockId){
   const { data, error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: answers });
   if (error) { alert('Не получилось: ' + error.message); return; }
   clearDirty();
-  markLocalSubmission(blockId, 'block', { answers });
-  await refreshLesson();
+  markLocalSubmission(blockId, 'block', { answers, auto_score: data?.score });
+  // без перерисовки урока: иначе стёрся бы набранный, но не отправленный ответ в другом задании
+  showBlockResult(blockId, data);
 }
 
 async function submitQuiz(blockId){
@@ -3961,8 +3982,32 @@ async function submitQuiz(blockId){
   const { data, error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: answers });
   if (error) { alert('Не получилось: ' + error.message); return; }
   clearDirty();
-  markLocalSubmission(blockId, 'block', { answers });
-  await refreshLesson();
+  markLocalSubmission(blockId, 'block', { answers, auto_score: data?.score });
+  // без перерисовки урока: иначе стёрся бы набранный, но не отправленный ответ в другом задании
+  showBlockResult(blockId, data);
+}
+
+// результат задания показываем на месте, не трогая остальную страницу
+function showBlockResult(blockId, data){
+  const box = document.getElementById('quiz-' + blockId) || document.getElementById('exin-' + blockId);
+  const host = box ? box.parentElement : null;
+  if (!host) return;
+  let res = host.querySelector('.block-result');
+  if (!res) {
+    res = document.createElement('div');
+    res.className = 'block-result';
+    res.style.marginTop = '12px';
+    host.appendChild(res);
+  }
+  const score = data?.score;
+  const pass = currentCourseData?.pass_score ?? 90;
+  if (score == null) {
+    res.innerHTML = '<div class="note ok">✅ Ответ сохранён.</div>';
+  } else if (score >= pass) {
+    res.innerHTML = `<div class="note ok">✅ Результат: <b>${score}%</b> — порог ${pass}% пройден.</div>`;
+  } else {
+    res.innerHTML = `<div class="note warn">Результат: <b>${score}%</b>. Нужно не меньше ${pass}% — проверьте ответы и отправьте снова.</div>`;
+  }
 }
 
 // ===== Редактор заданий =====
@@ -4114,6 +4159,21 @@ function collectMissingSections(){
   return missing;
 }
 
+function showMissingBlock(missing){
+  const ov = document.createElement('div');
+  ov.className = 'cd-overlay';
+  ov.innerHTML = `<div class="cd-modal" style="max-width:520px">
+    <h2 style="font-size:20px;margin:0 0 10px">Заполните все задания</h2>
+    <p style="color:var(--gray);font-size:14px;margin-bottom:12px">
+      Работу можно отправить только полностью. По этим заданиям нет ответа:</p>
+    <div class="md-list" style="margin-bottom:16px">
+      ${missing.map(m => `<div class="md-item"><span>⚠️ ${esc(m)}</span></div>`).join('')}
+    </div>
+    <button class="btn" style="padding:12px 22px" onclick="this.closest('.cd-overlay').remove()">Вернуться и заполнить</button>
+  </div>`;
+  document.body.appendChild(ov);
+}
+
 function showMissingConfirm(missing){
   return new Promise(resolve => {
     const ov = document.createElement('div');
@@ -4157,19 +4217,21 @@ async function finishLesson(){
   // предупреждаем, если что-то осталось незаполненным
   const missing = collectMissingSections();
   if (missing.length) {
-    const go = await showMissingConfirm(missing);
-    if (!go) { __finishing = false; return; }
+    showMissingBlock(missing);
+    __finishing = false;
+    return;
   }
   const { data, error } = await sb.rpc('learn_complete_lesson',
     { p_course_slug: currentCourse, p_lesson_slug: currentLesson.slug });
   if (error) { alert('Не получилось: ' + error.message); __finishing = false; return; }
   if (!data.ok) {
     document.getElementById('finishBox').innerHTML =
-      `<div class="note warn">${esc(data.reason)}</div>
+      `<div class="note warn"><b>${data.retry ? 'Нужно набрать больше' : 'Не всё готово'}</b><br>${esc(data.reason)}</div>
        <div style="margin-top:12px"><button class="btn btn-green" onclick="finishLesson()">Проверить ещё раз</button></div>`;
     __finishing = false;
     return;
   }
+  window.__lastFinishNeedsReview = !!data.needs_review;
   // урок сдан — таймер письменной части больше не нужен
   if (examTimerInterval) { clearInterval(examTimerInterval); examTimerInterval = null; }
   const tb = document.querySelector('.exam-timer');
@@ -4224,6 +4286,9 @@ async function submitLessonFeedback(courseSlug, lessonSlug, courseDone){
   __submittingFb = false;
   __finishing = false;
   if (courseDone) alert('🎉 Курс пройден!');
+  else if (window.__lastFinishNeedsReview) alert('✅ Урок завершён. Работа отправлена методисту на проверку.');
+  else alert('✅ Урок завершён.');
+  window.__lastFinishNeedsReview = false;
   await openCourse(courseSlug);
 }
 
