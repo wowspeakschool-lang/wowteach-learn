@@ -1862,7 +1862,7 @@ function renderReviewCabinet(){
   body.innerHTML = `
     <h1 style="font-size:32px;margin-bottom:16px">✅ Проверка работ</h1>
     <div class="rev-tabs">
-      <button class="rev-tab ${reviewTab==='queue'?'on':''}" onclick="switchReviewTab('queue')">📋 Очередь (${reviews.length})</button>
+      <button class="rev-tab ${reviewTab==='queue'?'on':''}" onclick="switchReviewTab('queue')">📋 Очередь (${countWorks(reviews)})</button>
       <button class="rev-tab ${reviewTab==='archive'?'on':''}" onclick="switchReviewTab('archive')">✅ Проверенные</button>
       <button class="rev-tab ${reviewTab==='notifs'?'on':''}" onclick="switchReviewTab('notifs')">🔔 Уведомления${unread?` <span class="rev-dot">${unread}</span>`:''}</button>
     </div>
@@ -1888,6 +1888,13 @@ function renderUnfinished(){
           ${w.block_id?`<button class="btn btn-ghost" style="padding:9px 18px;font-size:13px" onclick="openWorkTab('${w.enrollment_id}','${w.block_id}',event)">Посмотреть →</button>`:''}
         </div>
       </div>`).join('')}`;
+}
+
+
+// в очереди считаем РАБОТЫ (уроки), а не отдельные задания внутри них
+function countWorks(reviews){
+  const keys = new Set((reviews||[]).map(r => r.enrollment_id + '|' + (r.block_id || r.id)));
+  return keys.size;
 }
 
 function switchReviewTab(t){
@@ -2101,6 +2108,7 @@ function renderHomeworkWork(){
   const subs = full.submissions || {};
   const entries = Object.entries(subs);
   // максимум балла: задан в задании либо 100 по умолчанию
+  const isQuizBlock = Array.isArray(p.questions);   // тест: балл автоматический
   const hwMax = Number(p.max_score) > 0 ? Number(p.max_score) : 100;
   const prev = (full.grades || {})['_task'] || {};
   const hwScore = prev.score != null ? prev.score : hwMax;
@@ -2122,9 +2130,23 @@ function renderHomeworkWork(){
     } else if (text) {
       bodyHtml = `<div class="fw-answer" style="white-space:pre-wrap">${esc(text)}</div>`;
     } else if (isQuiz) {
-      const vals = Object.values(res);
-      const ok = vals.filter(v => v === true).length;
-      bodyHtml = `<div class="fw-answer">Тест выполнен автоматически: <b>${ok} из ${vals.length}</b> верно.</div>`;
+      const qs = (p.questions || []);
+      const auto = qs.filter(q => q.type !== 'text');
+      const ok = auto.reduce((n, q, i) => n + (res[qs.indexOf(q)] === true ? 1 : 0), 0);
+      // открытые вопросы: их нужно прочитать, ради них тест и приходит на проверку
+      const openQs = qs.map((q, qi) => ({ q, qi })).filter(x => x.q.type === 'text');
+      bodyHtml = `
+        ${auto.length ? `<div class="fw-answer" style="margin-bottom:${openQs.length?'12px':'0'}">Автопроверка: <b>${ok} из ${auto.length}</b> верно.</div>` : ''}
+        ${openQs.map(({ q, qi }) => {
+          const given = a[qi];
+          const txt = Array.isArray(given) ? given.join(', ') : (given != null ? String(given) : '');
+          return `<div style="margin-top:10px">
+            <div style="font-weight:700;font-size:14px">${esc(q.q)}</div>
+            ${txt.trim()
+              ? `<div class="fw-answer" style="margin-top:6px;white-space:pre-wrap">${esc(txt)}</div>`
+              : '<div class="note" style="margin-top:6px">Ответ не написан.</div>'}
+          </div>`;
+        }).join('')}`;
     } else if (s.storage_path || (a.files && a.files.length)) {
       bodyHtml = '<div class="note">Ответ прикреплён файлом.</div>';
     } else {
@@ -2133,7 +2155,7 @@ function renderHomeworkWork(){
 
     return `<div class="fw-section">
       <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
-        <b style="font-size:15px">${isQuiz ? 'Тест по лекции' : 'Ответ преподавателя'}</b>
+        <b style="font-size:15px">${isQuiz ? ((p.questions||[]).some(q => q.type === 'text') ? 'Тест по лекции — есть развёрнутый ответ' : 'Тест по лекции') : 'Ответ преподавателя'}</b>
         <span style="font-size:12px;color:var(--gray)">${when}</span>
       </div>
       ${bodyHtml}
@@ -2156,20 +2178,22 @@ function renderHomeworkWork(){
     ${answersHtml}
 
     <div class="fw-section" style="margin-top:16px">
-      <b style="font-size:15px">Оценка работы</b>
-      <div style="font-size:12.5px;color:var(--gray);margin-top:4px">Шкала 0–${hwMax}. Если в уроке несколько заданий, оценка за урок — среднее по ним.</div>
-      <div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
+      <b style="font-size:15px">${isQuizBlock ? 'Комментарий к тесту' : 'Оценка работы'}</b>
+      <div style="font-size:12.5px;color:var(--gray);margin-top:4px">${isQuizBlock
+        ? 'Балл за тест считается автоматически по доле верных ответов. Здесь можно только прокомментировать развёрнутый ответ.'
+        : `Шкала 0–${hwMax}. Оценка за урок — среднее по всем заданиям, включая автобалл теста.`}</div>
+      ${isQuizBlock ? '' : `<div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
         <input id="hw-score" type="number" min="0" max="${hwMax}" step="1" value="${hwScore}"
           style="width:110px;padding:11px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:16px;font-weight:800;text-align:center;background:#FDFCF8;font-family:inherit">
         <span style="font-size:15px;color:var(--gray)">из ${hwMax}</span>
-      </div>
+      </div>`}
       <textarea id="hw-comment" placeholder="Комментарий преподавателю: что получилось, что доработать…"
         oninput="this.style.height='auto';this.style.height=Math.max(130,this.scrollHeight+4)+'px'"
         style="width:100%;min-height:130px;padding:12px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:14px;line-height:1.55;background:#FDFCF8;margin-top:12px;resize:vertical;font-family:inherit">${hwComment}</textarea>
     </div>
 
     <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn" style="font-size:16px;padding:14px 32px" onclick="finishHomeworkReview('${enrollmentId}','${blockId}',${hwMax})">✅ Принять и выставить балл</button>
+      <button class="btn" style="font-size:16px;padding:14px 32px" onclick="finishHomeworkReview('${enrollmentId}','${blockId}',${hwMax},${isQuizBlock})">${isQuizBlock ? '✅ Принять работу' : '✅ Принять и выставить балл'}</button>
       <button class="btn btn-ghost" style="font-size:15px;padding:14px 26px" onclick="returnForRevision('${enrollmentId}','${blockId}')">↩ Вернуть на доработку</button>
     </div>`;
 }
@@ -2204,21 +2228,28 @@ async function openSubmissionFile(path, btn){
   window.open(data.signedUrl, '_blank', 'noopener');
 }
 
-async function finishHomeworkReview(enr, blk, max){
+async function finishHomeworkReview(enr, blk, max, isQuiz){
   const comment = (document.getElementById('hw-comment')?.value || '').trim();
-  const raw = (document.getElementById('hw-score')?.value || '').trim();
-  const score = raw === '' ? null : Number(raw);
-  if (score == null || isNaN(score) || score < 0 || score > max) {
-    alert(`Поставьте балл от 0 до ${max}.`); return;
+  if (isQuiz) {
+    if (!confirm('Принять работу?\n\nБалл за тест уже посчитан автоматически, преподаватель получит ваш комментарий.')) return;
+    const { error: cErr } = await sb.rpc('learn_comment_quiz',
+      { p_enrollment_id: enr, p_block_id: blk, p_comment: comment || null });
+    if (cErr) { alert('Не получилось: ' + cErr.message); return; }
+  } else {
+    const raw = (document.getElementById('hw-score')?.value || '').trim();
+    const score = raw === '' ? null : Number(raw);
+    if (score == null || isNaN(score) || score < 0 || score > max) {
+      alert(`Поставьте балл от 0 до ${max}.`); return;
+    }
+    if (!confirm(`Принять работу с баллом ${score} из ${max}?\n\nПреподаватель получит уведомление с оценкой и комментарием.`)) return;
+    const { error: gErr } = await sb.rpc('learn_grade_homework',
+      { p_enrollment_id: enr, p_block_id: blk, p_score: score, p_comment: comment || null, p_max_score: max });
+    if (gErr) { alert('Не получилось: ' + gErr.message); return; }
   }
-  if (!confirm(`Принять работу с баллом ${score} из ${max}?\n\nПреподаватель получит уведомление с оценкой и комментарием.`)) return;
-  const { error: gErr } = await sb.rpc('learn_grade_homework',
-    { p_enrollment_id: enr, p_block_id: blk, p_score: score, p_comment: comment || null, p_max_score: max });
-  if (gErr) { alert('Не получилось: ' + gErr.message); return; }
   const { error } = await sb.rpc('learn_finish_review',
     { p_enrollment_id: enr, p_block_id: blk, p_comment: comment || null });
   if (error) { alert('Балл сохранён, но уведомление не ушло: ' + error.message); }
-  alert(`✅ Работа принята. Балл: ${score} из ${max}`);
+  alert('✅ Работа принята.');
   backFromFullWork();
 }
 
