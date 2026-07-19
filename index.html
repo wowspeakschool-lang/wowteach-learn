@@ -2793,6 +2793,18 @@ async function loadHomeworkGrade(l){
   const host = document.getElementById('task-result-' + taskBlock.id)
             || document.getElementById('exam-result-' + taskBlock.id);
   if (!host) return;
+  const revOpen = !!(currentCourseData && currentCourseData.revision_open);
+  if (revOpen) {
+    host.innerHTML = `<div class="exam-pending-banner">
+      <div style="font-size:13px;font-weight:800;color:#B45309;text-transform:uppercase;letter-spacing:.5px">✏️ Работа открыта для доработки</div>
+      <div style="font-size:14px;margin-top:6px;color:var(--ink)">${
+        currentCourseData.revision_note
+          ? esc(currentCourseData.revision_note)
+          : 'Методист вернул работу. Дополните ответ и отправьте снова.'}</div>
+      <div style="font-size:13px;margin-top:6px;color:var(--gray)">Отметка о сдаче сохранена — статистика не изменится.</div>
+    </div>`;
+    return;
+  }
   if (!data || !data.graded) {
     if (l.done_at) {
       host.innerHTML = `<div class="exam-pending-banner">
@@ -2924,7 +2936,8 @@ function renderBlock(b){
     const files = ans.files || [];
     // восстанавливаем уже загруженные файлы в состояние редактора
     edFiles[b.id] = files.map(f => ({ ...f, uploaded: true }));
-    const locked = s?.review_status === 'pending' || s?.review_status === 'approved';
+    const revOpen = !!(currentCourseData && currentCourseData.revision_open);
+    const locked = !revOpen && (s?.review_status === 'pending' || s?.review_status === 'approved');
     return `<div class="block"><div class="qbox">
       <div id="task-result-${b.id}"></div>
       <h3>✍️ Задание</h3>
