@@ -2111,7 +2111,7 @@ function renderHomeworkWork(){
   const isQuizBlock = Array.isArray(p.questions);   // тест: балл автоматический
   const hwMax = Number(p.max_score) > 0 ? Number(p.max_score) : 100;
   const prev = (full.grades || {})['_task'] || {};
-  const hwScore = prev.score != null ? prev.score : hwMax;
+  const hwScore = prev.score != null ? prev.score : '';   // пусто: балл ставит методист
   const hwComment = prev.comment ? esc(prev.comment) : '';
 
   const answersHtml = entries.length ? entries.map(([key, s]) => {
@@ -2183,7 +2183,7 @@ function renderHomeworkWork(){
         ? 'Балл за тест считается автоматически по доле верных ответов. Здесь можно только прокомментировать развёрнутый ответ.'
         : `Шкала 0–${hwMax}. Оценка за урок — среднее по всем заданиям, включая автобалл теста.`}</div>
       ${isQuizBlock ? '' : `<div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
-        <input id="hw-score" type="number" min="0" max="${hwMax}" step="1" value="${hwScore}"
+        <input id="hw-score" type="number" min="0" max="${hwMax}" step="1" value="${hwScore}" placeholder="—"
           style="width:110px;padding:11px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:16px;font-weight:800;text-align:center;background:#FDFCF8;font-family:inherit">
         <span style="font-size:15px;color:var(--gray)">из ${hwMax}</span>
       </div>`}
