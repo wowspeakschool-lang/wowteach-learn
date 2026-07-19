@@ -984,10 +984,17 @@ function renderProgressOverview(rows){
                   ${c.lessons.map(ls => {
                     const done = !!ls.done_at;
                     const dd = done ? fmtWhen(ls.done_at) : '';
+                    const st = ls.revision ? 'revision'
+                             : (done && ls.pending) ? 'pending'
+                             : done ? 'done'
+                             : ls.started_at ? 'progress' : 'none';
+                    const icon = { revision:'✏️', pending:'⏳', done:'✅', progress:'🔸', none:'⚪️' }[st];
+                    const label = { revision:'на доработке', pending:'сдан '+dd+' · на проверке',
+                                    done:'проверен · '+dd, progress:'в процессе', none:'не начат' }[st];
                     return `<div class="tp-lesson">
-                      <span>${done?(ls.pending?'⏳':'✅'):(ls.started_at?'🔸':'⚪️')} ${esc(ls.title)}${ls.has_exam?' 📝':''}</span>
+                      <span>${icon} ${esc(ls.title)}${ls.has_exam?' 📝':''}</span>
                       <span style="display:flex;align-items:center;gap:10px;white-space:nowrap">
-                        <span style="color:var(--gray);font-size:11.5px">${done?(ls.pending?'сдан '+dd+' · на проверке':'проверен · '+dd):(ls.started_at?'в процессе':'не начат')}</span>
+                        <span style="color:var(--gray);font-size:11.5px">${label}</span>
                         ${ls.has_work ? `<button class="btn btn-ghost" style="padding:5px 12px;font-size:11.5px"
                           onclick="event.stopPropagation();openLessonAsTeacher('${c.enrollment_id}','${ls.slug}')">смотреть урок →</button>` : ''}
                       </span>
