@@ -2462,7 +2462,7 @@ async function saveGrade(enr, blk, sk, max){
   const btn = event.target;
   const { error } = await sb.rpc('learn_grade_task', {
     p_enrollment_id: enr, p_block_id: blk, p_section_key: sk,
-    p_score: score, p_max_score: max||null, p_comment: comment, p_approved: true
+    p_score: score, p_max_score: max||null, p_comment: comment, p_approved: null
   });
   if (error) { alert(error.message); return; }
   const { data: total } = await sb.rpc('learn_exam_total', { p_enrollment_id: enr, p_block_id: blk });
