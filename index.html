@@ -1895,7 +1895,7 @@ function renderReviewContent(){
           <div>
             <div style="font-weight:800;font-size:16px">${esc(w.student||'—')}</div>
             <div style="font-size:12.5px;color:var(--gray)">${esc(w.course||'')} · ${esc(w.lesson||'')}</div>
-            <div style="font-size:12px;color:var(--gray);margin-top:2px">✅ урок сдан целиком${w.lesson_done_at?' · '+new Date(w.lesson_done_at).toLocaleDateString('ru-RU'):''} · ${w.count} ${plural(w.count,'задание','задания','заданий')} на проверку</div>
+            <div style="font-size:12px;color:var(--gray);margin-top:2px">✅ урок сдан целиком${w.lesson_done_at?' · '+new Date(w.lesson_done_at).toLocaleDateString('ru-RU'):''}</div>
           </div>
           <button class="btn" style="padding:10px 22px" onclick="openFullWork('${enr}','${w.block_id||w.id}','queue')">Открыть работу целиком →</button>
         </div>
@@ -3196,6 +3196,8 @@ async function finishSpeaking(blockId, task, mime, stage){
       p_meta: { task: task.id, parts: paths, count: paths.length }
     });
     if (error) throw error;
+    markLocalSubmission(blockId, 'speaking_' + task.id,
+      { storage_path: paths[0], meta: { task: task.id, parts: paths, count: paths.length }, review_status: 'pending' });
     // НЕ перерисовываем урок целиком: это стирало бы незаполненные секции.
     // Показываем результат локально и даём перезаписать.
     stage.innerHTML = `
@@ -3551,8 +3553,11 @@ async function autosaveOneSection(boxId){
         answers[qi] = checked;
         if (checked.length) hasAny = true;
       });
-      if (hasAny) await sb.rpc('learn_submit_exam',
-        { p_block_id: blockId, p_section: 'quiz_' + si, p_kind: 'quiz', p_answers: answers, p_meta: { si: +si, auto: true } });
+      if (hasAny) {
+        await sb.rpc('learn_submit_exam',
+          { p_block_id: blockId, p_section: 'quiz_' + si, p_kind: 'quiz', p_answers: answers, p_meta: { si: +si, auto: true } });
+        markLocalSubmission(blockId, 'quiz_' + si, { answers });
+      }
     } else if (me) {
       const [, blockId, si] = me;
       const answers = {}; let hasAny = false;
@@ -3565,8 +3570,11 @@ async function autosaveOneSection(boxId){
         answers[t.dataset.ii] = seq;
         if (seq) hasAny = true;
       });
-      if (hasAny) await sb.rpc('learn_submit_exam',
-        { p_block_id: blockId, p_section: 'exact_' + si, p_kind: 'exact', p_answers: answers, p_meta: { si: +si, auto: true } });
+      if (hasAny) {
+        await sb.rpc('learn_submit_exam',
+          { p_block_id: blockId, p_section: 'exact_' + si, p_kind: 'exact', p_answers: answers, p_meta: { si: +si, auto: true } });
+        markLocalSubmission(blockId, 'exact_' + si, { answers });
+      }
     }
   } catch(_){}
 }
@@ -3622,6 +3630,18 @@ function collectExam(prefix, blockId, selector){
   return answers;
 }
 // локальное подтверждение сохранения секции (без перерисовки урока)
+
+// после отправки секции обновляем локальное состояние урока,
+// иначе проверка заполненности видит устаревшие данные
+function markLocalSubmission(blockId, sectionKey, data){
+  const blocks = (currentLesson && currentLesson.blocks) || [];
+  const b = blocks.find(x => x.id === blockId);
+  if (!b) return;
+  b.exam_state = b.exam_state || {};
+  b.exam_state[sectionKey] = Object.assign({ submitted_at: new Date().toISOString() },
+                                           b.exam_state[sectionKey] || {}, data || {});
+}
+
 function markSectionSaved(anchorId, btn, text){
   const el = document.getElementById(anchorId);
   const host = el ? (el.closest('.sec-body') || el.parentElement) : null;
@@ -3647,6 +3667,7 @@ async function submitExamQuiz(blockId, si, btn){
   const { error } = await sb.rpc('learn_submit_exam',
     { p_block_id: blockId, p_section: 'quiz_' + si, p_kind: 'quiz', p_answers: answers, p_meta: { si } });
   if (error) { alert('Не сохранилось: ' + error.message); return; }
+  markLocalSubmission(blockId, 'quiz_' + si, { answers });
   // НЕ перерисовываем урок: это стирало бы несохранённый ввод в других секциях
   markSectionSaved('exq-' + blockId + '-' + si, btn);
 }
@@ -3663,6 +3684,7 @@ async function submitExamExact(blockId, si, btn){
   const { error } = await sb.rpc('learn_submit_exam',
     { p_block_id: blockId, p_section: 'exact_' + si, p_kind: 'exact', p_answers: answers, p_meta: { si } });
   if (error) { alert('Не сохранилось: ' + error.message); return; }
+  markLocalSubmission(blockId, 'exact_' + si, { answers });
   // НЕ перерисовываем урок: это стирало бы несохранённый ввод в других секциях
   markSectionSaved('exe-' + blockId + '-' + si, btn);
 }
@@ -3710,6 +3732,7 @@ async function submitWriting(blockId, key){
           p_answers: { text }, p_meta: { via: 'typed', words: text.split(/\s+/).length } });
       if (error) throw error;
     }
+    markLocalSubmission(blockId, key, { answers: { text: (document.getElementById(`wr-ta-${blockId}-${key}`)||{}).value || '' }, review_status: 'pending' });
     markSectionSaved(`wr-ta-${blockId}-${key}`, null, 'Ответ отправлен на проверку');
   } catch(e){ alert('Не получилось: ' + (e.message||e)); }
 }
@@ -3726,6 +3749,7 @@ async function submitReflection(blockId){
     if (btn) { btn.disabled = false; btn.textContent = 'Отправить'; }
     return;
   }
+  markLocalSubmission(blockId, 'reflection', { answers: { text } });
   // явное подтверждение — препод должен видеть, что ответ ушёл
   if (btn) { btn.textContent = '✅ Отправлено'; btn.classList.add('btn-green'); }
   const box = ta.closest('.sec-body') || ta.parentElement;
@@ -3929,6 +3953,18 @@ async function finishLesson(){
   __finishing = true;
   // защита от потери: досохраняем все заполненные секции пробника
   await autosaveAllExamSections();
+  // подтягиваем свежее состояние сдач (без перерисовки урока — ввод не трогаем),
+  // иначе проверка может решить, что задание не сдано
+  try {
+    const { data } = await sb.rpc('learn_course_view', { p_course_slug: currentCourse });
+    const fresh = (data && data.lessons || []).find(x => x.slug === currentLesson.slug);
+    if (fresh && fresh.blocks) {
+      fresh.blocks.forEach(fb => {
+        const b = (currentLesson.blocks || []).find(x => x.id === fb.id);
+        if (b) b.exam_state = fb.exam_state || b.exam_state;
+      });
+    }
+  } catch(_){}
   // предупреждаем, если что-то осталось незаполненным
   const missing = collectMissingSections();
   if (missing.length) {
