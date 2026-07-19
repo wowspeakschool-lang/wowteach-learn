@@ -760,7 +760,7 @@ function renderLessonAsTeacher(d){
           const text = !rich && (a.text || a.answer) ? String(a.text || a.answer) : '';
           return `<div style="margin-top:10px">
             <div style="font-size:12px;color:var(--gray);margin-bottom:4px">Отправлено ${fmt(s.submitted_at)}</div>
-            ${rich ? `<div class="fw-answer">${a.html}</div>`
+            ${rich ? `<div class="fw-answer">${safeHtml(a.html)}</div>`
               : text ? `<div class="fw-answer" style="white-space:pre-wrap">${esc(text)}</div>`
               : (s.storage_path || (a.files && a.files.length)) ? '<div class="note">Ответ прикреплён файлом.</div>'
               : '<div class="note">Пустой ответ.</div>'}
@@ -2136,7 +2136,7 @@ function renderHomeworkWork(){
 
     let bodyHtml;
     if (rich) {
-      bodyHtml = `<div class="fw-answer">${a.html}</div>`;
+      bodyHtml = `<div class="fw-answer">${safeHtml(a.html)}</div>`;
     } else if (text) {
       bodyHtml = `<div class="fw-answer" style="white-space:pre-wrap">${esc(text)}</div>`;
     } else if (isQuiz) {
@@ -3518,13 +3518,26 @@ async function onExamExpire(blockId){
 async function autoSubmitWritten(blockId){
   const box = document.getElementById('exam-' + blockId);
   if (!box) return;
+  const failed = [];
   for (const q of box.querySelectorAll('[id^="exq-' + blockId + '-"]')) {
     const si = q.id.split('-').pop();
-    try { await submitExamQuiz(blockId, si); } catch(_){}
+    try { await submitExamQuiz(blockId, si); } catch(e){ failed.push('тест ' + si); }
   }
   for (const e of box.querySelectorAll('[id^="exe-' + blockId + '-"]')) {
     const si = e.id.split('-').pop();
-    try { await submitExamExact(blockId, si); } catch(_){}
+    try { await submitExamExact(blockId, si); } catch(err){ failed.push('задание ' + si); }
+  }
+  // если что-то не ушло — человек должен об этом узнать, а не потерять ответы молча
+  if (failed.length) {
+    const box2 = document.getElementById('exam-' + blockId);
+    if (box2) {
+      const warn = document.createElement('div');
+      warn.className = 'note warn';
+      warn.style.margin = '12px 0';
+      warn.innerHTML = '<b>Часть ответов не сохранилась при автоматической отправке.</b><br>'
+        + 'Проверьте интернет и нажмите «Сохранить ответ» в этих заданиях, иначе они не дойдут до методиста.';
+      box2.prepend(warn);
+    }
   }
 }
 
@@ -3748,9 +3761,11 @@ async function autosaveOneSection(boxId){
         if (checked.length) hasAny = true;
       });
       if (hasAny) {
-        await sb.rpc('learn_submit_exam',
+        const { error } = await sb.rpc('learn_submit_exam',
           { p_block_id: blockId, p_section: 'quiz_' + si, p_kind: 'quiz', p_answers: answers, p_meta: { si: +si, auto: true } });
+        if (error) { showAutosaveProblem(boxId); return; }
         markLocalSubmission(blockId, 'quiz_' + si, { answers });
+        showAutosaveOk(boxId);
       }
     } else if (me) {
       const [, blockId, si] = me;
@@ -3765,12 +3780,44 @@ async function autosaveOneSection(boxId){
         if (seq) hasAny = true;
       });
       if (hasAny) {
-        await sb.rpc('learn_submit_exam',
+        const { error } = await sb.rpc('learn_submit_exam',
           { p_block_id: blockId, p_section: 'exact_' + si, p_kind: 'exact', p_answers: answers, p_meta: { si: +si, auto: true } });
+        if (error) { showAutosaveProblem(boxId); return; }
         markLocalSubmission(blockId, 'exact_' + si, { answers });
+        showAutosaveOk(boxId);
       }
     }
-  } catch(_){}
+  } catch(e) {
+    showAutosaveProblem(boxId);
+  }
+}
+
+// подсказки об автосохранении: молча терять ответы нельзя
+function showAutosaveOk(boxId){
+  const box = document.getElementById(boxId);
+  if (!box) return;
+  let tip = box.querySelector('.autosave-tip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.className = 'autosave-tip';
+    tip.style.cssText = 'font-size:12px;color:var(--gray);margin-top:8px';
+    box.appendChild(tip);
+  }
+  tip.className = 'autosave-tip';
+  tip.textContent = '💾 сохранено';
+}
+function showAutosaveProblem(boxId){
+  const box = document.getElementById(boxId);
+  if (!box) return;
+  let tip = box.querySelector('.autosave-tip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.className = 'autosave-tip';
+    box.appendChild(tip);
+  }
+  tip.className = 'autosave-tip note warn';
+  tip.style.cssText = 'margin-top:8px;font-size:13px';
+  tip.innerHTML = '<b>Ответ не сохранился.</b> Проверьте интернет и нажмите «Сохранить ответ» — иначе он потеряется.';
 }
 
 // автосохранение ВСЕХ секций пробника перед завершением (защита от потери)
@@ -3827,6 +3874,26 @@ function collectExam(prefix, blockId, selector){
 
 // после отправки секции обновляем локальное состояние урока,
 // иначе проверка заполненности видит устаревшие данные
+
+// Ответ из редактора показываем с форматированием, но безопасно:
+// оставляем только разметку текста, убираем скрипты, стили и обработчики.
+function safeHtml(html){
+  const allowed = new Set(['B','STRONG','I','EM','U','P','BR','DIV','SPAN','UL','OL','LI',
+                           'H1','H2','H3','H4','TABLE','THEAD','TBODY','TR','TD','TH','A','BLOCKQUOTE','CODE','PRE']);
+  const box = document.createElement('div');
+  box.innerHTML = String(html || '');
+  box.querySelectorAll('*').forEach(el => {
+    if (!allowed.has(el.tagName)) { el.replaceWith(...el.childNodes); return; }
+    [...el.attributes].forEach(a => {
+      const n = a.name.toLowerCase();
+      const okHref = el.tagName === 'A' && n === 'href' && /^(https?:|mailto:)/i.test(a.value);
+      if (!okHref) el.removeAttribute(a.name);   // убираем onclick, style, src и прочее
+    });
+    if (el.tagName === 'A') { el.setAttribute('target','_blank'); el.setAttribute('rel','noopener'); }
+  });
+  return box.innerHTML;
+}
+
 function markLocalSubmission(blockId, sectionKey, data){
   const blocks = (currentLesson && currentLesson.blocks) || [];
   const b = blocks.find(x => x.id === blockId);
@@ -4174,27 +4241,6 @@ function showMissingBlock(missing){
   document.body.appendChild(ov);
 }
 
-function showMissingConfirm(missing){
-  return new Promise(resolve => {
-    const ov = document.createElement('div');
-    ov.className = 'cd-overlay';
-    ov.innerHTML = `<div class="cd-modal" style="max-width:520px">
-      <h2 style="font-size:20px;margin:0 0 10px">Не всё заполнено</h2>
-      <p style="color:var(--gray);font-size:14px;margin-bottom:12px">
-        По этим заданиям нет ответа. Если завершить сейчас, они уйдут на проверку пустыми.</p>
-      <div class="md-list" style="margin-bottom:16px">
-        ${missing.map(m => `<div class="md-item"><span>⚠️ ${esc(m)}</span></div>`).join('')}
-      </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn" id="mc-back" style="padding:12px 22px">Вернуться и заполнить</button>
-        <button class="btn btn-ghost" id="mc-go" style="padding:12px 22px">Всё равно завершить</button>
-      </div>
-    </div>`;
-    document.body.appendChild(ov);
-    ov.querySelector('#mc-back').onclick = () => { ov.remove(); resolve(false); };
-    ov.querySelector('#mc-go').onclick  = () => { ov.remove(); resolve(true); };
-  });
-}
 
 let __finishing = false;
 async function finishLesson(){
