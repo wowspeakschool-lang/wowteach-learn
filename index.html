@@ -659,7 +659,7 @@ async function openCourse(slug, fromRoute){
 
     ${(data.lessons||[]).map((l, i) => {
       // статус урока: доработка → на проверке → пройден → в процессе
-      const rev = !!data.revision_open && !!l.done_at;
+      const rev = !!l.revision_open && !!l.done_at;
       const pend = !rev && !!l.pending_review;
       const done = !!l.done_at && !rev && !pend;
       const cls = rev ? 'pending' : done ? 'done' : pend ? 'pending' : '';
@@ -783,7 +783,7 @@ function renderLessonAsTeacher(d){
   }).join('');
 
   const status = d.done_at
-    ? `<span class="tp-flag ok">✅ сдан ${new Date(d.done_at).toLocaleDateString('ru-RU')}</span>`
+    ? `<span class="tp-flag ok">✅ сдан ${fmtWhen(d.done_at)}</span>`
     : d.started_at ? '<span class="tp-flag warn">🔸 в процессе</span>' : '<span class="tp-flag">не начат</span>';
 
   body.innerHTML = `
@@ -824,8 +824,12 @@ async function openProgress(){
   const body = document.getElementById('reviewBody');
   body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Загружаю…</div>';
   if (window.__isEditor) {
-    const { data, error } = await sb.rpc('learn_teachers_progress');
+    const [{ data, error }, { data: watch }] = await Promise.all([
+      sb.rpc('learn_teachers_progress'),
+      sb.rpc('learn_deadline_watch')
+    ]);
     if (error) { body.innerHTML = '<div class="note warn">'+esc(error.message)+'</div>'; return; }
+    window.__watch = watch || [];
     renderProgressOverview(data || []);
   } else {
     const { data, error } = await sb.rpc('learn_my_progress');
@@ -871,6 +875,40 @@ function renderMyProgress(courses){
     }).join('')}`;
 }
 
+
+// требует внимания: дедлайн прошёл, пора выдать сертификат, сроки горят
+function renderWatchBlock(){
+  const list = window.__watch || [];
+  if (!list.length) return '';
+  const groups = {
+    overdue: { title: '⚠️ Дедлайн прошёл, курс не завершён', items: [], cls: 'bad' },
+    ready:   { title: '🎓 Всё пройдено и проверено — можно завершать курс', items: [], cls: 'ok' },
+    soon:    { title: '⏰ Дедлайн близко, пройдено меньше половины', items: [], cls: 'warn' },
+  };
+  list.forEach(w => groups[w.kind]?.items.push(w));
+  const fmt = d => d ? new Date(d).toLocaleDateString('ru-RU') : '';
+  return Object.values(groups).filter(g => g.items.length).map(g => `
+    <div style="margin-bottom:14px">
+      <div style="font-size:13.5px;font-weight:800;margin-bottom:8px">${g.title} (${g.items.length})</div>
+      ${g.items.map(w => `
+        <div class="rev-card" style="padding:12px 15px">
+          <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
+            <div>
+              <b>${esc(w.teacher||'—')}</b>
+              <span style="font-size:12.5px;color:var(--gray)"> · ${esc(w.course||'')}</span>
+              <div style="font-size:12px;color:var(--gray)">
+                пройдено ${w.done}/${w.total} (${w.percent}%)${w.deadline?` · дедлайн ${fmt(w.deadline)}`:''}${w.pending?` · ${w.pending} на проверке`:''}
+              </div>
+            </div>
+            ${w.kind === 'ready'
+              ? `<button class="btn" style="padding:8px 16px;font-size:13px"
+                   onclick="finishCourseManually('${w.enrollment_id}','${esc(w.course)}',${w.done},${w.total})">🎓 Завершить курс</button>`
+              : ''}
+          </div>
+        </div>`).join('')}
+    </div>`).join('');
+}
+
 let progressSearch = '';
 function renderProgressOverview(rows){
   const body = document.getElementById('reviewBody');
@@ -885,6 +923,7 @@ function renderProgressOverview(rows){
   body.innerHTML = `
     <h1 style="font-size:32px;margin-bottom:8px">📊 Прогресс преподавателей</h1>
     <p style="color:var(--gray);margin-bottom:16px">Работы, статусы, дедлайны и прогресс. Нажмите на преподавателя для деталей.</p>
+    ${renderWatchBlock()}
     <input placeholder="🔍 Поиск преподавателя…" value="${esc(progressSearch)}"
       oninput="progressSearch=this.value;renderProgressOverview(window.__progressRows);this.focus()"
       style="width:100%;padding:11px 15px;border:2px solid var(--cream-dark);border-radius:11px;font-size:14px;background:#fff;margin-bottom:16px">
@@ -944,7 +983,7 @@ function renderProgressOverview(rows){
                 ${(c.lessons||[]).length ? `<div class="tp-lessons">
                   ${c.lessons.map(ls => {
                     const done = !!ls.done_at;
-                    const dd = done ? new Date(ls.done_at).toLocaleDateString('ru-RU') : '';
+                    const dd = done ? fmtWhen(ls.done_at) : '';
                     return `<div class="tp-lesson">
                       <span>${done?(ls.pending?'⏳':'✅'):(ls.started_at?'🔸':'⚪️')} ${esc(ls.title)}${ls.has_exam?' 📝':''}</span>
                       <span style="display:flex;align-items:center;gap:10px;white-space:nowrap">
@@ -1235,7 +1274,7 @@ async function openLessonDetail(lessonSlug){
   const stuck = d.stuck_list || [];
   const reviews = d.reviews || [];
   const dist = d.score_dist || {};
-  const fmt = x => x ? new Date(x).toLocaleDateString('ru-RU') : '';
+  const fmt = x => x ? fmtWhen(x) : '';
   const stars = n => '★'.repeat(n)+'☆'.repeat(5-n);
 
   // распределение баллов по диапазонам 0-20,20-40,...
@@ -1611,7 +1650,7 @@ function renderRecentComments(){
     return `<h3 style="font-size:17px;margin:24px 0 12px">💬 Что пишут преподаватели</h3>
       <div class="note">Пока никто не оставил текстовый комментарий — только оценки.</div>`;
   }
-  const fmt = x => new Date(x).toLocaleDateString('ru-RU');
+  const fmt = x => fmtWhen(x);
   return `
     <h3 style="font-size:17px;margin:24px 0 12px">💬 Что пишут преподаватели
       <span style="font-size:12.5px;font-weight:400;color:var(--gray)">— ${list.length} ${plural(list.length,'комментарий','комментария','комментариев')}</span></h3>
@@ -1893,7 +1932,7 @@ function renderUnfinished(){
         <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center">
           <div>
             <div style="font-weight:700">${esc(w.teacher||'—')}</div>
-            <div style="font-size:12.5px;color:var(--gray)">${esc(w.course||'')} · ${esc(w.lesson||'')} · отправлено ${w.sent} ${plural(w.sent,'задание','задания','заданий')}${w.last_at?' · последнее '+new Date(w.last_at).toLocaleDateString('ru-RU'):''}</div>
+            <div style="font-size:12.5px;color:var(--gray)">${esc(w.course||'')} · ${esc(w.lesson||'')} · отправлено ${w.sent} ${plural(w.sent,'задание','задания','заданий')}${w.last_at?' · последнее '+fmtWhen(w.last_at):''}</div>
           </div>
           ${w.block_id?`<button class="btn btn-ghost" style="padding:9px 18px;font-size:13px" onclick="openWorkTab('${w.enrollment_id}','${w.block_id}',event)">Посмотреть →</button>`:''}
         </div>
@@ -1940,7 +1979,7 @@ function renderReviewContent(){
       style="width:100%;padding:11px 15px;border:2px solid var(--cream-dark);border-radius:11px;font-size:14px;background:#fff;margin-bottom:14px">`;
     if (!works.length) { el.innerHTML = search + '<div class="note">Проверенных работ пока нет.</div>'; return; }
     el.innerHTML = search + works.map(w => {
-      const d = w.reviewed_at ? new Date(w.reviewed_at).toLocaleDateString('ru-RU') : '';
+      const d = w.reviewed_at ? fmtWhen(w.reviewed_at) : '';
       return `<div class="rev-card">
         <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center">
           <div>
@@ -1978,7 +2017,7 @@ function renderReviewContent(){
           <div>
             <div style="font-weight:800;font-size:16px">${esc(w.student||'—')}</div>
             <div style="font-size:12.5px;color:var(--gray)">${esc(w.course||'')} · ${esc(w.lesson||'')}</div>
-            <div style="font-size:12px;color:var(--gray);margin-top:2px">✅ урок сдан целиком${w.lesson_done_at?' · '+new Date(w.lesson_done_at).toLocaleDateString('ru-RU'):''}</div>
+            <div style="font-size:12px;color:var(--gray);margin-top:2px">✅ урок сдан целиком${w.lesson_done_at?' · '+fmtWhen(w.lesson_done_at):''}</div>
           </div>
           <button class="btn" style="padding:10px 22px" onclick="openFullWork('${enr}','${w.block_id||w.id}','queue')">Открыть работу целиком →</button>
         </div>
@@ -2607,7 +2646,7 @@ function renderDossier(d){
       <div class="dos-hist-row">
         <div style="flex:1">
           <div style="font-weight:600;font-size:14px">${esc(h.course)} · ${esc(h.lesson)}</div>
-          <div style="font-size:12px;color:var(--gray)">${h.section?esc(h.section)+' · ':''}${new Date(h.submitted_at).toLocaleDateString('ru-RU')}</div>
+          <div style="font-size:12px;color:var(--gray)">${h.section?esc(h.section)+' · ':''}${fmtWhen(h.submitted_at)}</div>
         </div>
         <div style="text-align:right;font-size:13px">
           ${h.auto_score!=null?`<b>${h.auto_score}%</b>`:''}
@@ -2803,7 +2842,7 @@ async function loadHomeworkGrade(l){
   const host = document.getElementById('task-result-' + taskBlock.id)
             || document.getElementById('exam-result-' + taskBlock.id);
   if (!host) return;
-  const revOpen = !!(currentCourseData && currentCourseData.revision_open);
+  const revOpen = !!(l && l.revision_open);
   if (revOpen) {
     host.innerHTML = `<div class="exam-pending-banner">
       <div style="font-size:13px;font-weight:800;color:#B45309;text-transform:uppercase;letter-spacing:.5px">✏️ Работа открыта для доработки</div>
@@ -2828,6 +2867,7 @@ async function loadHomeworkGrade(l){
   const many = tasks.length > 1;
   host.innerHTML = `<div class="exam-result-banner">
     <div style="font-size:13px;font-weight:800;color:#15803D;text-transform:uppercase;letter-spacing:.5px">✅ Работа проверена</div>
+    ${data.tasks && data.tasks.find(t=>t.graded_at) ? `<div style="font-size:12.5px;color:var(--gray);margin-top:4px">проверено ${fmtWhen(data.tasks.find(t=>t.graded_at).graded_at)}</div>` : ''}
     <div style="font-size:19px;margin-top:6px">Оценка за урок: <b>${data.average}</b> из 100${many?` <span style="font-size:14px;color:var(--gray)">— среднее по ${tasks.length} ${plural(tasks.length,'заданию','заданиям','заданиям')}</span>`:''}</div>
     ${tasks.map(t => `
       <div style="margin-top:12px">
@@ -2946,7 +2986,7 @@ function renderBlock(b){
     const files = ans.files || [];
     // восстанавливаем уже загруженные файлы в состояние редактора
     edFiles[b.id] = files.map(f => ({ ...f, uploaded: true }));
-    const revOpen = !!(currentCourseData && currentCourseData.revision_open);
+    const revOpen = !!(currentLesson && currentLesson.revision_open);
     const locked = !revOpen && (s?.review_status === 'pending' || s?.review_status === 'approved');
     return `<div class="block"><div class="qbox">
       <div id="task-result-${b.id}"></div>
@@ -3417,7 +3457,7 @@ function renderExam(b){
   const hasTimer = !!p.written_timer_sec;
   const started = !!timer;
   const preview = !!window.__isEditor;   // методист — режим предпросмотра
-  const revisionOpen = !preview && !!(currentCourseData && currentCourseData.revision_open);
+  const revisionOpen = !preview && !!(currentLesson && currentLesson.revision_open);
 
   // экран «Начать тест» — только для ученика (не для предпросмотра)
   if (hasTimer && !started && !preview) {
@@ -3692,14 +3732,14 @@ function renderSection(blockId, sec, si, st){
                   ${t.prepSec?`⏱ подготовка ${t.prepSec}с · `:''}${modeHint}${t.allowReRecord===false?' · без перезаписи':''}
                 </div>
               </div>
-              ${(done==='pending'||done==='approved') && !(currentCourseData && currentCourseData.revision_open)
+              ${(done==='pending'||done==='approved') && !(currentLesson && currentLesson.revision_open)
                 ? `<span class="sp-done">✅ записано</span>`
                 : `<button class="btn" style="padding:10px 20px;font-size:14px"
                      onclick='startSpeaking("${blockId}", ${JSON.stringify(t).replace(/'/g,"&#39;")})'>${(done==='pending'||done==='approved')?'🔄 Перезаписать':'▶ Начать'}</button>`}
             </div>
             ${(() => {
               const material = `${t.prompt_html ? `<div class="block-text" style="margin-top:10px;font-size:14px">${t.prompt_html}</div>` : ''}${imgs}`;
-              const revOpen = currentCourseData && currentCourseData.revision_open;
+              const revOpen = currentLesson && currentLesson.revision_open;
               const hideUntilStart = t.prepSec > 0 && !(done==='pending'||done==='approved') && !revOpen;
               if (!material) return '';
               if (hideUntilStart) {
@@ -4354,6 +4394,13 @@ function plural(n, one, few, many){
   if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
   return many;
 }
+// дата и время: «19.07.2026, 14:32» — для сдачи и проверки работ
+function fmtWhen(x){
+  if (!x) return '';
+  const d = new Date(x);
+  return d.toLocaleDateString('ru-RU') + ', ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
 function fmtHours(h){
   if (h == null) return '—';
   const totalMin = Math.round(Number(h) * 60);
