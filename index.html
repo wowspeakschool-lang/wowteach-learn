@@ -912,6 +912,13 @@ function renderProgressOverview(rows){
                   ${status}
                 </div>
                 <div class="tp-bar" style="margin-top:8px"><i style="width:${cpct}%"></i></div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+                  ${c.completed
+                    ? `<button class="btn btn-ghost" style="padding:7px 14px;font-size:12.5px"
+                        onclick="event.stopPropagation();reopenCourse('${c.enrollment_id}')">↩ Отменить завершение</button>`
+                    : `<button class="btn" style="padding:7px 14px;font-size:12.5px"
+                        onclick="event.stopPropagation();finishCourseManually('${c.enrollment_id}','${esc(c.title)}',${c.done},${c.total})">🎓 Завершить курс</button>`}
+                </div>
                 <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--gray);margin-top:8px">
                   <span>📚 ${c.done}/${c.total} уроков (${cpct}%)</span>
                   ${c.exam_reviewed && c.score!=null ? `<span>🎯 балл: <b style="color:var(--ink)">${c.score}%</b></span>` : ''}
@@ -938,6 +945,30 @@ function renderProgressOverview(rows){
         </div>`;
       }).join('')}
     </div>`;
+}
+
+
+// завершение курса — решение методиста, а не автоматика
+async function finishCourseManually(enrollmentId, title, done, total){
+  const warn = (done < total)
+    ? `\n\nВнимание: пройдено ${done} из ${total} уроков.`
+    : '';
+  if (!confirm(`Завершить курс «${title}»?${warn}\n\nБудет выдан сертификат.`)) return;
+  const { data, error } = await sb.rpc('learn_finish_course', { p_enrollment_id: enrollmentId });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  if (data && data.ok === false) { alert(data.reason || 'Не получилось'); return; }
+  alert(data && data.certificate
+    ? `Курс завершён. Сертификат № ${data.certificate}`
+    : 'Курс завершён.');
+  openProgress();
+}
+
+async function reopenCourse(enrollmentId){
+  if (!confirm('Отменить завершение курса?\n\nСертификат будет отозван.')) return;
+  const { error } = await sb.rpc('learn_reopen_course',
+    { p_enrollment_id: enrollmentId, p_drop_certificate: true });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  openProgress();
 }
 
 function toggleTp(i){
@@ -1491,8 +1522,12 @@ async function openFeedback(period){
   show('review');
   const body = document.getElementById('reviewBody');
   body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Загружаю отзывы…</div>';
-  const { data, error } = await sb.rpc('learn_feedback_overview', { p_period: feedbackPeriod });
+  const [{ data, error }, { data: comments }] = await Promise.all([
+    sb.rpc('learn_feedback_overview', { p_period: feedbackPeriod }),
+    sb.rpc('learn_recent_comments', { p_limit: 30 })
+  ]);
   if (error) { body.innerHTML = '<div class="note warn">'+esc(error.message)+'</div>'; return; }
+  window.__fbComments = comments || [];
   renderFeedback(data);
 }
 
@@ -1548,6 +1583,31 @@ function renderFeedback(d){
           </div>
         </div>`;
       }).join('') : '<div class="note">Отзывов пока нет.</div>'}
+    </div>
+
+    ${renderRecentComments()}`;
+}
+
+// письменные отзывы — сразу на главном экране, без захода в курс
+function renderRecentComments(){
+  const list = window.__fbComments || [];
+  if (!list.length) {
+    return `<h3 style="font-size:17px;margin:24px 0 12px">💬 Что пишут преподаватели</h3>
+      <div class="note">Пока никто не оставил текстовый комментарий — только оценки.</div>`;
+  }
+  const fmt = x => new Date(x).toLocaleDateString('ru-RU');
+  return `
+    <h3 style="font-size:17px;margin:24px 0 12px">💬 Что пишут преподаватели
+      <span style="font-size:12.5px;font-weight:400;color:var(--gray)">— ${list.length} ${plural(list.length,'комментарий','комментария','комментариев')}</span></h3>
+    <div class="fb-reviews" style="max-height:none">
+      ${list.map(r => `
+        <div class="fb-review">
+          <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+            <span style="color:#F59E0B">${'★'.repeat(r.stars)}${'☆'.repeat(5-r.stars)}</span>
+            <span style="font-size:12px;color:var(--gray)">${esc(r.teacher||'—')} · ${r.emoji||''} ${esc(r.lesson||'')} · ${fmt(r.created_at)}</span>
+          </div>
+          <div style="font-size:14px;margin-top:6px;white-space:pre-wrap">${esc(r.comment)}</div>
+        </div>`).join('')}
     </div>`;
 }
 
