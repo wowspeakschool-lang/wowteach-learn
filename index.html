@@ -2163,6 +2163,8 @@ function renderHomeworkWork(){
   const p = full.payload || {};
   const subs = full.submissions || {};
   const entries = Object.entries(subs);
+  const __parts = Array.isArray(p.parts) ? p.parts : null;
+  if (__parts) { renderTaskPartsReview(full, enrollmentId, blockId, body); return; }
   // максимум балла: задан в задании либо 100 по умолчанию
   const isQuizBlock = Array.isArray(p.questions);   // тест: балл автоматический
   const hwMax = Number(p.max_score) > 0 ? Number(p.max_score) : 100;
@@ -2252,6 +2254,79 @@ function renderHomeworkWork(){
       <button class="btn" style="font-size:16px;padding:14px 32px" onclick="finishHomeworkReview('${enrollmentId}','${blockId}',${hwMax},${isQuizBlock})">${isQuizBlock ? '✅ Принять работу' : '✅ Принять и выставить балл'}</button>
       <button class="btn btn-ghost" style="font-size:15px;padding:14px 26px" onclick="returnForRevision('${enrollmentId}','${blockId}')">↩ Вернуть на доработку</button>
     </div>`;
+}
+
+
+
+// ДЗ с несколькими заданиями: свой ответ и своя оценка на каждое
+function renderTaskPartsReview(full, enrollmentId, blockId, body){
+  const p = full.payload || {};
+  const subs = full.submissions || {};
+  const grades = full.grades || {};
+  const parts = p.parts || [];
+  const entries = Object.entries(subs);
+  const sub = entries.map(([k,s]) => s)
+      .find(s => s && s.answers && (s.answers.parts || s.answers.html || (s.answers.files && s.answers.files.length)))
+    || (entries[0] && entries[0][1]) || {};
+  const a = sub.answers || {};
+
+  const partsHtml = parts.map((pt, pi) => {
+    const val = a.parts ? a.parts[pi] : '';
+    const has = val && String(val).trim();
+    const g = grades['part_' + pi] || {};
+    const gv = g.score != null ? g.score : '';
+    const gc = g.comment ? esc(g.comment) : '';
+    return `<div class="fw-section">
+      <div style="font-weight:800;font-size:15px;margin-bottom:8px">${esc(pt.title || ('Задание ' + (pi+1)))}</div>
+      ${pt.prompt_html ? `<div style="margin-bottom:8px"><button class="fw-toggle" onclick="const b=this.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none';this.textContent=b.style.display==='none'?'\U0001f4c4 Показать текст задания':'\U0001f4c4 Скрыть текст задания'">\U0001f4c4 Показать текст задания</button><div style="display:none" class="fw-tasktext">${pt.prompt_html}</div></div>` : ''}
+      ${has ? `<div class="fw-answer">${safeHtml(val)}</div>` : '<div class="note">Ответ не написан.</div>'}
+      <div class="fw-grade">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:13px;font-weight:700">Балл:</label>
+          <input type="number" id="hw-score-${pi}" min="0" max="100" step="1" value="${gv}" placeholder="—"
+            style="width:90px;padding:9px 12px;border:2px solid var(--cream-dark);border-radius:8px;font-size:15px;font-weight:800;text-align:center;background:#FDFCF8;font-family:inherit">
+          <span style="color:var(--gray);font-size:13px">из 100</span>
+        </div>
+        <textarea id="hw-comment-${pi}" placeholder="Комментарий по этому заданию…"
+          style="width:100%;min-height:90px;padding:10px 12px;border:2px solid var(--cream-dark);border-radius:10px;font-size:14px;background:#FDFCF8;margin-top:8px;resize:vertical;font-family:inherit">${gc}</textarea>
+      </div>
+    </div>`;
+  }).join('');
+
+  body.innerHTML = `
+    <button class="btn btn-ghost" style="margin-bottom:16px;padding:8px 16px;font-size:13px" onclick="backFromFullWork()">← Назад</button>
+    <button class="btn btn-ghost" style="margin-bottom:16px;margin-left:8px;padding:8px 16px;font-size:13px" onclick="copyWorkLink('${enrollmentId}','${blockId}',this)">\U0001f517 Скопировать ссылку</button>
+    <h1 style="font-size:26px;margin-bottom:4px">${esc(full.teacher || '—')}</h1>
+    <p style="color:var(--gray);margin-bottom:18px">${esc(full.course || '')} · ${esc(full.lesson || '')}</p>
+    <div class="note" style="margin-bottom:14px">Оцените каждое задание отдельно (0–100). Оценка за урок — среднее по заданиям и автобаллу теста.</div>
+    ${partsHtml}
+    ${renderAttachments(a, sub)}
+    <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn" style="font-size:16px;padding:14px 32px" onclick="finishPartsReview('${enrollmentId}','${blockId}',${parts.length})">✅ Завершить проверку</button>
+      <button class="btn btn-ghost" style="font-size:15px;padding:14px 26px" onclick="returnForRevision('${enrollmentId}','${blockId}')">↩ Вернуть на доработку</button>
+    </div>`;
+}
+
+async function finishPartsReview(enr, blk, n){
+  const scores = [], comments = [];
+  for (let i = 0; i < n; i++){
+    const raw = (document.getElementById('hw-score-' + i)?.value || '').trim();
+    const sc = raw === '' ? null : Number(raw);
+    if (sc == null || isNaN(sc) || sc < 0 || sc > 100){ alert('Поставьте балл от 0 до 100 для задания ' + (i+1) + '.'); return; }
+    scores.push(sc);
+    comments.push((document.getElementById('hw-comment-' + i)?.value || '').trim() || null);
+  }
+  if (!confirm('Завершить проверку? Преподаватель получит оценки по каждому заданию и уведомление.')) return;
+  for (let i = 0; i < n; i++){
+    const { error } = await sb.rpc('learn_grade_task', {
+      p_enrollment_id: enr, p_block_id: blk, p_section_key: 'part_' + i,
+      p_score: scores[i], p_max_score: 100, p_comment: comments[i], p_approved: null });
+    if (error){ alert('Не сохранилось задание ' + (i+1) + ': ' + error.message); return; }
+  }
+  const { error } = await sb.rpc('learn_finish_review', { p_enrollment_id: enr, p_block_id: blk, p_comment: null });
+  if (error){ alert('Баллы сохранены, но уведомление не ушло: ' + error.message); }
+  alert('✅ Работа принята. Оценки по заданиям сохранены, преподаватель уведомлён.');
+  backFromFullWork();
 }
 
 
@@ -2989,43 +3064,52 @@ function renderBlock(b){
   if (b.type === 'task') {
     const s = b.submission;
     const ans = s?.answers || {};
-    const savedHtml = ans.html || ans.text || '';   // text — совместимость со старым форматом
     const files = ans.files || [];
-    // восстанавливаем уже загруженные файлы в состояние редактора
     edFiles[b.id] = files.map(f => ({ ...f, uploaded: true }));
     const revOpen = !!(currentLesson && currentLesson.revision_open);
     const locked = !revOpen && (s?.review_status === 'pending' || s?.review_status === 'approved');
-    return `<div class="block"><div class="qbox">
-      <div id="task-result-${b.id}"></div>
-      <h3>✍️ Задание</h3>
-      <div class="block-text" style="margin-bottom:16px">${p.html || ''}</div>
+    const parts = Array.isArray(p.parts) ? p.parts : null;
 
-      <div class="editor ${locked?'locked':''}" id="ed-wrap-${b.id}">
+    const editorHtml = (id, saved) => `
+      <div class="editor ${locked?'locked':''}">
         <div class="toolbar">
           <button type="button" onclick="fmt('bold')" title="Жирный"><b>Ж</b></button>
           <button type="button" onclick="fmt('italic')" title="Курсив"><i>К</i></button>
           <button type="button" onclick="fmt('insertUnorderedList')" title="Список">•—</button>
           <button type="button" onclick="fmt('insertOrderedList')" title="Нумерованный">1.</button>
-          <button type="button" onclick="fmtBlock('H3')" title="Заголовок">H</button>
-          <button type="button" onclick="fmtBlock('BLOCKQUOTE')" title="Цитата">❝</button>
         </div>
-        <div class="ed" id="task-${b.id}" contenteditable="${locked?'false':'true'}"
-             data-ph="Напишите ваш ответ…" oninput="edCount('${b.id}')">${savedHtml}</div>
-      </div>
+        <div class="ed" id="${id}" contenteditable="${locked?'false':'true'}" data-ph="Напишите ваш ответ…">${saved||''}</div>
+      </div>`;
 
+    let inner;
+    if (parts) {
+      const saved = ans.parts || {};
+      inner = parts.map((pt, pi) => `
+        <div style="margin-bottom:22px">
+          ${pt.title ? `<h3 style="font-size:16px;margin-bottom:8px">${esc(pt.title)}</h3>` : ''}
+          ${pt.prompt_html ? `<div class="block-text" style="margin-bottom:12px">${pt.prompt_html}</div>` : ''}
+          ${editorHtml('task-'+b.id+'-'+pi, saved[pi])}
+        </div>`).join('');
+    } else {
+      inner = editorHtml('task-'+b.id, ans.html || ans.text || '');
+    }
+
+    return `<div class="block"><div class="qbox">
+      <div id="task-result-${b.id}"></div>
+      <h3>✍️ ${esc(p.title || 'Задание')}</h3>
+      ${p.html ? `<div class="block-text" style="margin-bottom:16px">${p.html}</div>` : ''}
+      ${inner}
       <div class="files" id="files-${b.id}">
         ${files.map((f,i) => fileChip(f, b.id, i, locked)).join('')}
       </div>
       ${locked ? '' : `<label class="drop" id="drop-${b.id}">
-        <input type="file" id="file-${b.id}" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.doc,.docx,.ppt,.pptx,.txt,.mp4,.mov,.webm" onchange="pickFiles('${b.id}')" style="display:none">
-        <span>📎 Прикрепить файлы</span>
-        <span class="hint">PDF, картинки, Word, PowerPoint, видео до 5 мин · до 3 файлов, 50 МБ</span>
+        <input type="file" id="file-${b.id}" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.doc,.docx,.ppt,.pptx,.txt" onchange="pickFiles('${b.id}')" style="display:none">
+        <span>📎 Прикрепить файл (по желанию)</span>
+        <span class="hint">Если удобнее приложить фото/документ</span>
       </label>`}
-
       ${s?.review_status === 'pending' ? '<div class="note warn">⏳ Отправлено методисту на проверку</div>' : ''}
       ${s?.review_status === 'approved' ? `<div class="note ok">✅ Принято методистом${s.note ? ': ' + esc(s.note) : ''}</div>` : ''}
       ${s?.review_status === 'rejected' ? `<div class="note err">✏️ Нужно доработать${s.note ? ': ' + esc(s.note) : ''}</div>` : ''}
-
       ${locked && s?.review_status !== 'rejected' ? '' :
         `<div style="margin-top:16px"><button class="btn" id="taskBtn-${b.id}" onclick="submitTask('${b.id}')">Отправить на проверку</button></div>`}
     </div></div>`;
@@ -4169,14 +4253,32 @@ function redrawFiles(blockId){
 }
 
 async function submitTask(blockId){
-  const ed = document.getElementById('task-' + blockId);
-  const html = ed.innerHTML.trim();
+  const block = (currentLesson?.blocks || []).find(x => x.id === blockId);
+  const parts = block?.payload?.parts && Array.isArray(block.payload.parts) ? block.payload.parts : null;
   const list = edFiles[blockId] || [];
-  if ((!html || html === '<br>') && !list.length) { alert('Напишите ответ или прикрепите файл.'); return; }
+
+  let answers;
+  if (parts) {
+    const partsAns = {};
+    let anyText = false;
+    parts.forEach((pt, pi) => {
+      const ed = document.getElementById('task-' + blockId + '-' + pi);
+      let html = ed ? ed.innerHTML.trim() : '';
+      if (html === '<br>') html = '';
+      partsAns[pi] = html;
+      if (html) anyText = true;
+    });
+    if (!anyText && !list.length) { alert('Напишите ответ хотя бы в одном задании или прикрепите файл.'); return; }
+    answers = { parts: partsAns };
+  } else {
+    const ed = document.getElementById('task-' + blockId);
+    const html = ed.innerHTML.trim();
+    if ((!html || html === '<br>') && !list.length) { alert('Напишите ответ или прикрепите файл.'); return; }
+    answers = { html };
+  }
 
   const btn = document.getElementById('taskBtn-' + blockId);
   if (btn) { btn.disabled = true; btn.textContent = 'Отправляю…'; }
-
   try {
     const { data: { session } } = await sb.auth.getSession();
     const uid = session.user.id;
@@ -4190,13 +4292,11 @@ async function submitTask(blockId){
       f.uploaded = true; f.path = path;
       files.push({ path, name: f.name, size: f.size, type: f.type });
     }
-
-    const { error } = await sb.rpc('learn_submit_block',
-      { p_block_id: blockId, p_answers: { html, files } });
+    answers.files = files;
+    const { error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: answers });
     if (error) throw error;
     clearDirty();
-    markLocalSubmission(blockId, 'task', { answers: { html, files }, review_status: 'pending' });
-    // НЕ перерисовываем урок: это стирало бы набранный ответ
+    markLocalSubmission(blockId, 'task', { answers, review_status: 'pending' });
     if (btn) { btn.disabled = false; btn.textContent = '✅ Отправлено'; }
     const host = document.getElementById('taskBtn-' + blockId)?.parentElement;
     if (host && !host.querySelector('.task-sent')) {
