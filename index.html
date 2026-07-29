@@ -668,7 +668,11 @@ async function openCourse(slug, fromRoute){
         : rev ? '<span class="lesson-chip-pending">на доработке</span>'
         : pend ? '<span class="lesson-chip-pending">на проверке</span>'
         : '<span style="color:var(--purple);font-weight:800">→</span>';
-      return `
+      // заголовок подраздела перед первым уроком новой секции
+      const prevSection = i > 0 ? (data.lessons[i-1].section || null) : null;
+      const secHdr = (l.section && l.section !== prevSection)
+        ? `<div class="an-section-title" style="margin:24px 0 10px">${esc(l.section)}</div>` : '';
+      return `${secHdr}
       <div class="lesson-item ${cls} ${l.locked?'locked':''}"
            onclick="${l.locked ? '' : `go('lesson/${currentCourse}/${l.slug}')`}">
         <div class="n">${icon}</div>
