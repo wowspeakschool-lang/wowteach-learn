@@ -2915,6 +2915,10 @@ function renderLesson(slug, keepScroll){
         ? '<div class="note ok">✅ Урок пройден</div>'
         : `<button class="btn btn-green" onclick="finishLesson()">Завершить урок ✓</button>`}
     </div>`;
+  // инициализация блоков «соединить пары» (восстановление ответа + отрисовка линий)
+  (l.blocks || []).forEach(b => { if (b.type === 'match') try { mtInit(b.id); } catch(_){} });
+  if (!window.__mtResize) { window.__mtResize = true;
+    window.addEventListener('resize', () => { document.querySelectorAll('.mt-wrap').forEach(w => { try { mtRedraw(w.id.replace('match-','')); } catch(_){} }); }); }
   // слушатели вешаем ОДИН раз (иначе накапливаются при каждой перерисовке)
   if (!body.dataset.listenersAttached) {
     body.dataset.listenersAttached = '1';
@@ -3255,27 +3259,35 @@ function renderBlock(b){
     lefts = Array.isArray(lefts) ? lefts : [];
     rights = Array.isArray(rights) ? rights : [];
     const saved = (s?.answers?.match && Array.isArray(s.answers.match)) ? s.answers.match : [];
-    return `<div class="block"><div class="qbox" id="match-${b.id}">
+    const savedRi = lefts.map((_, li) => { const v = saved[li]; return (v == null) ? null : rights.indexOf(v); });
+    const boxCss = 'border:2px solid var(--cream-dark);border-radius:12px;padding:12px 16px;background:#FDFCF8;font-weight:600;position:relative;min-height:44px;display:flex;align-items:center';
+    return `<div class="block"><div class="qbox mt-wrap" id="match-${b.id}" data-saved='${esc(JSON.stringify(savedRi))}'>
       <h3>🔗 ${esc(p.title || 'Соедините пары')}</h3>
-      ${p.note ? `<div style="font-size:13px;color:var(--gray);margin-bottom:12px">${esc(p.note)}</div>` : ''}
-      <div style="display:flex;gap:16px;flex-wrap:wrap">
-        <div style="flex:1;min-width:240px">
-          ${lefts.map((lf, li) => {
-            const mark = res ? res[li] : undefined;
-            const placed = saved[li] || '';
-            return `<div class="mt-row" data-li="${li}" style="display:flex;align-items:center;gap:8px;margin:6px 0">
-              <span style="flex:0 0 42%;font-weight:700">${esc(lf)}</span>
-              <span class="mt-slot" data-li="${li}" style="flex:1;min-height:40px;display:flex;align-items:center;border:2px dashed ${mark===false?'var(--red)':mark===true?'#8BD3A0':'var(--cream-dark)'};border-radius:10px;padding:5px 8px;background:#FDFCF8">${placed?`<span class="mt-chip" draggable="true" data-val="${esc(placed)}" style="display:inline-block;background:#F0ECFF;border:1px solid var(--purple);border-radius:999px;padding:5px 12px;cursor:grab;font-weight:600">${esc(placed)}</span>`:''}</span>
-            </div>`;
-          }).join('')}
-        </div>
-        <div class="mt-bank" style="flex:0 0 210px;min-height:60px;border:2px dashed var(--cream-dark);border-radius:10px;padding:8px;background:#fff">
-          <div style="font-size:12px;color:var(--gray);margin-bottom:6px">Перетащите варианты влево:</div>
-          ${rights.filter(r => !saved.includes(r)).map(r => `<span class="mt-chip" draggable="true" data-val="${esc(r)}" style="display:inline-block;background:#F0ECFF;border:1px solid var(--purple);border-radius:999px;padding:5px 12px;margin:3px;cursor:grab;font-weight:600">${esc(r)}</span>`).join('')}
+      ${p.note ? `<div style="font-size:13px;color:var(--gray);margin-bottom:14px">${esc(p.note)}</div>` : ''}
+      <div class="mt-grid" style="position:relative">
+        <svg class="mt-lines" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1;overflow:visible"></svg>
+        <div style="display:flex;justify-content:space-between;gap:46px;position:relative;z-index:2">
+          <div style="flex:1;display:flex;flex-direction:column;gap:14px">
+            ${lefts.map((lf, li) => {
+              const mark = res ? res[li] : undefined;
+              return `<div class="mt-l" data-li="${li}" data-val="${esc(lf)}" style="${boxCss};padding-right:24px;${mark===false?'border-color:var(--red)':mark===true?'border-color:#3FB273':''}">
+                <span style="flex:1">${esc(lf)}</span>
+                <span class="mt-dot" onclick="mtDotClick('${b.id}','l',${li})" style="position:absolute;right:-9px;top:50%;transform:translateY(-50%);width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid var(--purple);cursor:pointer;z-index:4"></span>
+              </div>`;
+            }).join('')}
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:14px">
+            ${rights.map((rt, ri) => `<div class="mt-r" data-ri="${ri}" data-val="${esc(rt)}" style="${boxCss};padding-left:24px">
+                <span class="mt-dot" onclick="mtDotClick('${b.id}','r',${ri})" style="position:absolute;left:-9px;top:50%;transform:translateY(-50%);width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid var(--purple);cursor:pointer;z-index:4"></span>
+                <span style="flex:1">${esc(rt)}</span>
+              </div>`).join('')}
+          </div>
         </div>
       </div>
-      ${s?.auto_score != null ? `<div class="note ${ok?'ok':'warn'}">Результат: <b>${s.auto_score}%</b>${ok?' ✅':` — нужно минимум ${pass}%`}</div>` : ''}
-      <div style="margin-top:16px"><button class="btn" onclick="submitMatch('${b.id}')">${s?'Проверить ещё раз':'Проверить'}</button></div>
+      ${s?.auto_score != null ? `<div class="note ${ok?'ok':'warn'}" style="margin-top:16px">Результат: <b>${s.auto_score}%</b>${ok?' ✅':` — нужно минимум ${pass}%`}</div>` : ''}
+      <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn" onclick="submitMatch('${b.id}')">${s?'Проверить ещё раз':'Проверить'}</button>
+        <button class="btn btn-ghost" onclick="mtClear('${b.id}')">Сбросить</button></div>
     </div></div>`;
   }
   return '';
@@ -3297,55 +3309,77 @@ async function submitOrder(blockId){
   markLocalSubmission(blockId, 'block', { answers: { order }, auto_score: data?.score, results: data?.results });
   showBlockResult(blockId, data);
 }
-// ==== интерактив: match (пары) ====
-async function submitMatch(blockId){
-  const box = document.getElementById('match-' + blockId);
-  const match = [...box.querySelectorAll('.mt-row')].map(r => {
-    const c = r.querySelector('.mt-slot .mt-chip'); return c ? c.dataset.val : null;
+// ==== интерактив: match (соединение линиями) ====
+const _mtState = {};
+function mtGet(id){ return _mtState[id] || (_mtState[id] = { conns:{}, active:null }); }
+function mtInit(id){
+  const wrap = document.getElementById('match-' + id); if (!wrap) return;
+  const st = mtGet(id); st.conns = {}; st.active = null;
+  try { (JSON.parse(wrap.dataset.saved || '[]')).forEach((ri, li) => { if (ri != null && ri >= 0) st.conns[li] = ri; }); } catch(_){}
+  mtHighlight(id); mtRedraw(id);
+}
+function mtHighlight(id){
+  const wrap = document.getElementById('match-' + id); if (!wrap) return; const st = mtGet(id);
+  wrap.querySelectorAll('.mt-l').forEach(el => { const d = el.querySelector('.mt-dot');
+    if (d) d.style.background = (String(el.dataset.li) === String(st.active)) ? 'var(--purple)' : '#fff'; });
+}
+function mtRedraw(id){
+  const wrap = document.getElementById('match-' + id); if (!wrap) return;
+  const svg = wrap.querySelector('.mt-lines'); if (!svg) return;
+  const st = mtGet(id); const org = svg.getBoundingClientRect();
+  const res = ((currentLesson?.blocks||[]).find(x => x.id === id))?.submission?.results || null;
+  let out = '';
+  Object.keys(st.conns).forEach(li => {
+    const ri = st.conns[li];
+    const ld = wrap.querySelector(`.mt-l[data-li="${li}"] .mt-dot`);
+    const rd = wrap.querySelector(`.mt-r[data-ri="${ri}"] .mt-dot`);
+    if (!ld || !rd) return;
+    const a = ld.getBoundingClientRect(), c = rd.getBoundingClientRect();
+    const x1 = a.left + a.width/2 - org.left, y1 = a.top + a.height/2 - org.top;
+    const x2 = c.left + c.width/2 - org.left, y2 = c.top + c.height/2 - org.top;
+    const col = res ? (res[li] === true ? '#3FB273' : res[li] === false ? '#C62828' : '#5A45D9') : '#5A45D9';
+    out += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${col}" stroke-width="3" stroke-linecap="round"/>`;
   });
+  svg.innerHTML = out;
+}
+function mtDotClick(id, side, idx){
+  const st = mtGet(id);
+  if (side === 'l') {
+    if (st.conns[idx] != null) { delete st.conns[idx]; st.active = null; mtHighlight(id); mtRedraw(id); }
+    else { st.active = (String(st.active) === String(idx)) ? null : idx; mtHighlight(id); }
+  } else {
+    const usedBy = Object.keys(st.conns).find(k => String(st.conns[k]) === String(idx));
+    if (st.active != null) { if (usedBy != null) delete st.conns[usedBy]; st.conns[st.active] = idx; st.active = null; mtHighlight(id); mtRedraw(id); }
+    else if (usedBy != null) { delete st.conns[usedBy]; mtRedraw(id); }
+  }
+  try { markDirty(); } catch(_){}
+}
+function mtClear(id){ const st = mtGet(id); st.conns = {}; st.active = null; mtHighlight(id); mtRedraw(id); }
+async function submitMatch(blockId){
+  const wrap = document.getElementById('match-' + blockId); const st = mtGet(blockId);
+  const rvals = []; wrap.querySelectorAll('.mt-r').forEach(el => { rvals[+el.dataset.ri] = el.dataset.val; });
+  const nLeft = wrap.querySelectorAll('.mt-l').length;
+  const match = []; for (let li = 0; li < nLeft; li++) { const ri = st.conns[li]; match.push(ri != null ? rvals[ri] : null); }
   const { data, error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: { match } });
   if (error) { alert('Не получилось: ' + error.message); return; }
   clearDirty();
   markLocalSubmission(blockId, 'block', { answers: { match }, auto_score: data?.score, results: data?.results });
+  mtRedraw(blockId);
   showBlockResult(blockId, data);
 }
-// drag-and-drop (делегирование для всех order/match на странице) + клик-фолбэк для тача
+// drag-and-drop только для order (расстановка по порядку)
 (function initInteractiveDnD(){
   if (window.__interactiveDnD) return; window.__interactiveDnD = true;
-  let dragEl = null, dragKind = null;
-  document.addEventListener('dragstart', e => {
-    const ord = e.target.closest?.('.ord-item'); const chip = e.target.closest?.('.mt-chip');
-    if (ord) { dragEl = ord; dragKind = 'ord'; e.dataTransfer.effectAllowed = 'move'; }
-    else if (chip) { dragEl = chip; dragKind = 'chip'; e.dataTransfer.effectAllowed = 'move'; }
-  });
+  let dragEl = null;
+  document.addEventListener('dragstart', e => { const ord = e.target.closest?.('.ord-item'); if (ord) { dragEl = ord; e.dataTransfer.effectAllowed = 'move'; } });
   document.addEventListener('dragover', e => {
-    if (dragKind === 'ord') {
-      const li = e.target.closest?.('.ord-item');
-      if (li && li !== dragEl) { e.preventDefault(); const rect = li.getBoundingClientRect();
-        const after = (e.clientY - rect.top) / rect.height > 0.5;
-        li.parentElement.insertBefore(dragEl, after ? li.nextSibling : li); }
-    } else if (dragKind === 'chip') {
-      if (e.target.closest?.('.mt-slot, .mt-bank')) e.preventDefault();
-    }
+    if (!dragEl) return; const li = e.target.closest?.('.ord-item');
+    if (li && li !== dragEl) { e.preventDefault(); const rect = li.getBoundingClientRect();
+      const after = (e.clientY - rect.top) / rect.height > 0.5;
+      li.parentElement.insertBefore(dragEl, after ? li.nextSibling : li); }
   });
-  document.addEventListener('drop', e => {
-    if (dragKind === 'chip' && dragEl) {
-      const slot = e.target.closest?.('.mt-slot'); const bank = e.target.closest?.('.mt-bank');
-      const box = dragEl.closest('.qbox'); const bankEl = box?.querySelector('.mt-bank');
-      if (slot) { const ex = slot.querySelector('.mt-chip'); if (ex && ex !== dragEl && bankEl) bankEl.appendChild(ex); slot.appendChild(dragEl); e.preventDefault(); }
-      else if (bank) { bank.appendChild(dragEl); e.preventDefault(); }
-    }
-    dragEl = null; dragKind = null; try { markDirty(); } catch(_){}
-  });
-  document.addEventListener('dragend', () => { dragEl = null; dragKind = null; });
-  let sel = null;
-  document.addEventListener('click', e => {
-    const chip = e.target.closest?.('.mt-chip'); const slot = e.target.closest?.('.mt-slot');
-    if (chip) { if (sel) sel.style.outline = ''; sel = chip; chip.style.outline = '2px solid var(--purple)'; return; }
-    if (slot && sel) { const box = slot.closest('.qbox'); const bankEl = box?.querySelector('.mt-bank');
-      const ex = slot.querySelector('.mt-chip'); if (ex && bankEl) bankEl.appendChild(ex);
-      slot.appendChild(sel); sel.style.outline = ''; sel = null; try { markDirty(); } catch(_){} }
-  });
+  document.addEventListener('drop', () => { dragEl = null; try { markDirty(); } catch(_){} });
+  document.addEventListener('dragend', () => { dragEl = null; });
 })();
 
 // снять отметки с неверно отвеченных вопросов, чтобы ответить заново
