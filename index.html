@@ -106,6 +106,9 @@ button{font-family:inherit;cursor:pointer}
 .opt input{margin-top:3px;accent-color:var(--purple);width:17px;height:17px}
 .opt.correct{border-color:var(--green);background:var(--green-light)}
 .opt.wrong{border-color:var(--red);background:var(--red-light)}
+.srv-rate span{transition:.12s}
+.srv-rate:hover span{border-color:var(--purple)}
+.srv-rate input:checked + span{background:var(--purple);color:#fff;border-color:var(--purple)}
 .q textarea{width:100%;padding:12px 14px;border:2px solid var(--cream-dark);border-radius:12px;
   font-size:15px;background:#FDFCF8;min-height:100px;resize:vertical}
 .explain{font-size:13.5px;color:var(--gray);background:var(--cream);border-radius:10px;padding:10px 14px;margin-top:8px}
@@ -802,6 +805,35 @@ function renderLessonAsTeacher(d){
         <b style="font-size:15px">🔗 ${esc(p.title || 'Пары')}</b>
         <span class="fw-auto" style="margin-left:8px">${sub ? `${ok} из ${pairs.length} верно` : 'не проходил'}</span>
         <div style="margin-top:8px">${pairs.map((pr, li) => `<div style="font-size:13.5px;margin:3px 0">${esc(pr.left)} → <b>${esc(pr.right)}</b>${given.length ? ` · ответ: ${esc(given[li] || '—')} <span style="color:${res[li]===true?'#15803D':'var(--red)'}">${res[li]===true?'✓':'✗'}</span>` : ''}</div>`).join('')}</div>
+      </div>`;
+    }
+
+    if (b.type === 'checklist') {
+      const sub = subs[0]; const a = (sub && sub.answers) || {};
+      const items = p.items || []; const checked = Array.isArray(a.checked) ? a.checked : [];
+      const ok = checked.filter(Boolean).length;
+      return `<div class="fw-section">
+        <b style="font-size:15px">✅ ${esc(p.title || 'Чек-лист')}</b>
+        <span class="fw-auto" style="margin-left:8px">${sub ? `${ok} из ${items.length} отмечено` : 'не проходил'}</span>
+        ${sub && (a.name || a.date) ? `<div style="font-size:13px;color:var(--gray);margin-top:4px">Подпись: <b>${esc(a.name || '—')}</b>${a.date ? ` · ${esc(a.date)}` : ''}</div>` : ''}
+        <div style="margin-top:8px">${items.map((it, ii) => `<div style="font-size:13.5px;margin:3px 0"><span style="color:${checked[ii]?'#15803D':'var(--red)'}">${checked[ii]?'☑':'☐'}</span> ${esc(it)}</div>`).join('')}</div>
+      </div>`;
+    }
+
+    if (b.type === 'survey') {
+      const sub = subs[0]; const a = (sub && sub.answers) || {}; const resp = a.responses || {};
+      const qs = p.questions || [];
+      return `<div class="fw-section">
+        <b style="font-size:15px">💬 ${esc(p.title || 'Опрос')}</b>
+        <span class="fw-auto" style="margin-left:8px">${sub ? 'пройден' : 'не проходил'}</span>
+        ${!sub ? '' : `<div style="margin-top:8px">${qs.map((qq, qi) => {
+          const v = resp[qi]; let disp;
+          if (qq.type === 'rating') disp = (v != null ? `${v} из ${qq.max || 5}` : '—');
+          else if (qq.type === 'multi') disp = (Array.isArray(v) && v.length ? v.map(i => (qq.options || [])[i]).filter(Boolean).join(', ') : '—');
+          else if (qq.type === 'single') disp = (v != null ? (qq.options || [])[v] : '—');
+          else disp = (v ? String(v) : '—');
+          return `<div class="fw-q"><div style="font-weight:700;font-size:14px">${qi+1}. ${esc(qq.q)}</div><div style="font-size:13.5px;margin-top:4px;white-space:pre-wrap">${esc(disp || '—')}</div></div>`;
+        }).join('')}</div>`}
       </div>`;
     }
 
@@ -3290,6 +3322,75 @@ function renderBlock(b){
         <button class="btn btn-ghost" onclick="mtClear('${b.id}')">Сбросить</button></div>
     </div></div>`;
   }
+  if (b.type === 'checklist') {
+    const s = b.submission;
+    const ans = s?.answers || {};
+    const res = s?.results || null;
+    const sign = p.sign !== false;
+    const items = p.items || [];
+    const saved = Array.isArray(ans.checked) ? ans.checked : [];
+    const done = s?.auto_score === 100;
+    const today = new Date().toLocaleDateString('ru-RU');
+    return `<div class="block"><div class="qbox" id="chk-${b.id}">
+      <h3>✅ ${esc(p.title || 'Чек-лист')}</h3>
+      ${p.note ? `<div style="font-size:13px;color:var(--gray);margin-bottom:14px">${esc(p.note)}</div>` : ''}
+      <div style="display:flex;flex-direction:column;gap:2px">
+      ${items.map((it, ii) => {
+        const mark = res ? res[ii] : undefined;
+        return `<label class="opt">
+          <input type="checkbox" data-ci="${ii}" ${saved[ii] ? 'checked' : ''}>
+          <span style="${mark===false?'color:var(--red)':''}">${esc(it)}</span>
+        </label>`;
+      }).join('')}
+      </div>
+      ${sign ? `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:14px;align-items:center">
+        <input type="text" id="chk-name-${b.id}" placeholder="Ваши ФИО (подпись)" value="${esc(ans.name || '')}"
+          autocomplete="off"
+          style="flex:1;min-width:220px;padding:11px 14px;border:2px solid var(--cream-dark);border-radius:10px;font-size:15px;background:#FDFCF8;font-weight:700">
+        <span style="color:var(--gray);font-size:14px">Дата: <b>${esc(ans.date || today)}</b></span>
+      </div>` : ''}
+      ${done ? `<div class="note ok" style="margin-top:14px">✅ Подтверждено${ans.name ? ' · ' + esc(ans.name) : ''}${ans.date ? ' · ' + esc(ans.date) : ''}</div>` : ''}
+      <div style="margin-top:16px"><button class="btn" onclick="submitChecklist('${b.id}')">${s ? 'Сохранить ещё раз' : 'Подтвердить'}</button></div>
+    </div></div>`;
+  }
+  if (b.type === 'survey') {
+    const s = b.submission;
+    const resp = (s?.answers?.responses) || {};
+    const done = !!s;
+    const qs = p.questions || [];
+    return `<div class="block"><div class="qbox" id="srv-${b.id}">
+      <h3>💬 ${esc(p.title || 'Опрос')}</h3>
+      ${p.intro ? `<div style="font-size:13px;color:var(--gray);margin-bottom:14px">${esc(p.intro)}</div>` : ''}
+      ${qs.map((qq, qi) => {
+        const val = resp[qi];
+        let field = '';
+        if (qq.type === 'rating') {
+          const mx = qq.max || 5;
+          field = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">${
+            Array.from({length: mx}, (_, k) => k + 1).map(nn => `
+              <label class="srv-rate" style="cursor:pointer">
+                <input type="radio" name="srv-${b.id}-${qi}" value="${nn}" ${String(val)===String(nn)?'checked':''} style="display:none">
+                <span style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border:2px solid var(--cream-dark);border-radius:10px;font-weight:800;font-size:15px;background:#FDFCF8">${nn}</span>
+              </label>`).join('')}</div>`;
+        } else if (qq.type === 'multi' || qq.type === 'single') {
+          const arr = Array.isArray(val) ? val : (val != null ? [val] : []);
+          field = (qq.options || []).map((o, oi) => `
+            <label class="opt">
+              <input type="${qq.type==='multi'?'checkbox':'radio'}" name="srv-${b.id}-${qi}" value="${oi}" ${arr.includes(oi)?'checked':''}>
+              <span>${esc(o)}</span>
+            </label>`).join('');
+        } else {
+          field = `<textarea data-sq="${qi}" placeholder="Ваш ответ…" style="width:100%;margin-top:8px">${esc(val || '')}</textarea>`;
+        }
+        return `<div class="q" data-sq="${qi}" data-stype="${qq.type}">
+          <div class="qt">${qi+1}. ${esc(qq.q)}</div>
+          ${field}
+        </div>`;
+      }).join('')}
+      ${done ? '<div class="note ok" style="margin-top:14px">✅ Спасибо! Ваши ответы записаны.</div>' : ''}
+      <div style="margin-top:16px"><button class="btn" onclick="submitSurvey('${b.id}')">${done ? 'Изменить ответы' : 'Отправить'}</button></div>
+    </div></div>`;
+  }
   return '';
 }
 
@@ -3365,6 +3466,55 @@ async function submitMatch(blockId){
   clearDirty();
   markLocalSubmission(blockId, 'block', { answers: { match }, auto_score: data?.score, results: data?.results });
   mtRedraw(blockId);
+  showBlockResult(blockId, data);
+}
+// ==== интерактив: checklist (галочки + подпись) ====
+async function submitChecklist(blockId){
+  const box = document.getElementById('chk-' + blockId);
+  const block = (currentLesson?.blocks || []).find(x => x.id === blockId);
+  const items = block?.payload?.items || [];
+  const sign = block?.payload?.sign !== false;
+  const boxes = [...box.querySelectorAll('input[type=checkbox][data-ci]')]
+    .sort((a, b) => (+a.dataset.ci) - (+b.dataset.ci));
+  const checked = boxes.map(c => c.checked);
+  if (checked.length < items.length || checked.some(v => !v)) {
+    alert('Отметьте, пожалуйста, все пункты чек-листа.'); return;
+  }
+  let name = '';
+  if (sign) {
+    name = (document.getElementById('chk-name-' + blockId)?.value || '').trim();
+    if (!name) { alert('Впишите, пожалуйста, ваши ФИО (подпись).'); return; }
+  }
+  const date = new Date().toLocaleDateString('ru-RU');
+  const { data, error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: { checked, name, date } });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  clearDirty();
+  markLocalSubmission(blockId, 'block', { answers: { checked, name, date }, auto_score: data?.score, results: data?.results });
+  showBlockResult(blockId, data);
+}
+// ==== интерактив: survey (опрос) ====
+async function submitSurvey(blockId){
+  const box = document.getElementById('srv-' + blockId);
+  const block = (currentLesson?.blocks || []).find(x => x.id === blockId);
+  const qs = block?.payload?.questions || [];
+  const responses = {};
+  for (let qi = 0; qi < qs.length; qi++) {
+    const qq = qs[qi];
+    if (qq.type === 'rating' || qq.type === 'single') {
+      const sel = box.querySelector(`input[name="srv-${blockId}-${qi}"]:checked`);
+      if (!sel) { alert('Ответьте, пожалуйста, на вопрос ' + (qi + 1) + '.'); return; }
+      responses[qi] = +sel.value;
+    } else if (qq.type === 'multi') {
+      responses[qi] = [...box.querySelectorAll(`input[name="srv-${blockId}-${qi}"]:checked`)].map(x => +x.value);
+    } else {
+      const ta = box.querySelector(`textarea[data-sq="${qi}"]`);
+      responses[qi] = (ta?.value || '').trim();
+    }
+  }
+  const { data, error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: { responses } });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  clearDirty();
+  markLocalSubmission(blockId, 'block', { answers: { responses }, auto_score: data?.score });
   showBlockResult(blockId, data);
 }
 // drag-and-drop только для order (расстановка по порядку)
@@ -4380,7 +4530,8 @@ async function submitQuiz(blockId){
 // результат задания показываем на месте, не трогая остальную страницу
 function showBlockResult(blockId, data){
   const box = document.getElementById('quiz-' + blockId) || document.getElementById('exin-' + blockId)
-           || document.getElementById('order-' + blockId) || document.getElementById('match-' + blockId);
+           || document.getElementById('order-' + blockId) || document.getElementById('match-' + blockId)
+           || document.getElementById('chk-' + blockId) || document.getElementById('srv-' + blockId);
   const host = box ? box.parentElement : null;
   if (!host) return;
   let res = host.querySelector('.block-result');
