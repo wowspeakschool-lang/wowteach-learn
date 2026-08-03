@@ -3246,8 +3246,14 @@ function renderBlock(b){
     const res = s?.results || null;
     const pass = currentCourseData?.pass_score ?? 90;
     const ok = s?.auto_score != null && s.auto_score >= pass;
-    const lefts = p.lefts || [];
-    const rights = p.rights || [];
+    // ученику course_view отдаёт готовые lefts/rights; редактору — полный payload с pairs → соберём сами
+    let lefts = p.lefts, rights = p.rights;
+    if ((!Array.isArray(lefts) || !Array.isArray(rights)) && Array.isArray(p.pairs)) {
+      lefts = p.pairs.map(x => x.left);
+      rights = p.pairs.map(x => x.right).slice().sort(() => Math.random() - 0.5);
+    }
+    lefts = Array.isArray(lefts) ? lefts : [];
+    rights = Array.isArray(rights) ? rights : [];
     const saved = (s?.answers?.match && Array.isArray(s.answers.match)) ? s.answers.match : [];
     return `<div class="block"><div class="qbox" id="match-${b.id}">
       <h3>🔗 ${esc(p.title || 'Соедините пары')}</h3>
