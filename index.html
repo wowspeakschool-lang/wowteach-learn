@@ -783,6 +783,28 @@ function renderLessonAsTeacher(d){
       </div>`;
     }
 
+    if (b.type === 'order') {
+      const sub = subs[0]; const a = (sub && sub.answers) || {}; const res = a.__results || {};
+      const items = p.items || []; const given = Array.isArray(a.order) ? a.order : [];
+      const ok = Object.values(res).filter(v => v === true).length;
+      return `<div class="fw-section">
+        <b style="font-size:15px">🔀 ${esc(p.title || 'Порядок')}</b>
+        <span class="fw-auto" style="margin-left:8px">${sub ? `${ok} из ${items.length} верно` : 'не проходил'}</span>
+        <ol style="margin:8px 0 0 18px">${items.map((it, ix) => `<li>${esc(it)}${given.length ? ` — ответ: <b>${esc(given[ix] || '—')}</b> <span style="color:${res[ix]===true?'#15803D':'var(--red)'}">${res[ix]===true?'✓':'✗'}</span>` : ''}</li>`).join('')}</ol>
+      </div>`;
+    }
+
+    if (b.type === 'match') {
+      const sub = subs[0]; const a = (sub && sub.answers) || {}; const res = a.__results || {};
+      const pairs = p.pairs || []; const given = Array.isArray(a.match) ? a.match : [];
+      const ok = Object.values(res).filter(v => v === true).length;
+      return `<div class="fw-section">
+        <b style="font-size:15px">🔗 ${esc(p.title || 'Пары')}</b>
+        <span class="fw-auto" style="margin-left:8px">${sub ? `${ok} из ${pairs.length} верно` : 'не проходил'}</span>
+        <div style="margin-top:8px">${pairs.map((pr, li) => `<div style="font-size:13.5px;margin:3px 0">${esc(pr.left)} → <b>${esc(pr.right)}</b>${given.length ? ` · ответ: ${esc(given[li] || '—')} <span style="color:${res[li]===true?'#15803D':'var(--red)'}">${res[li]===true?'✓':'✗'}</span>` : ''}</div>`).join('')}</div>
+      </div>`;
+    }
+
     return '';
   }).join('');
 
@@ -3193,8 +3215,132 @@ function renderBlock(b){
       </div>
     </div></div>`;
   }
+  if (b.type === 'order') {
+    const s = b.submission;
+    const res = s?.results || null;
+    const pass = currentCourseData?.pass_score ?? 90;
+    const ok = s?.auto_score != null && s.auto_score >= pass;
+    const items = (s?.answers?.order && Array.isArray(s.answers.order)) ? s.answers.order : (p.items || []);
+    return `<div class="block"><div class="qbox" id="order-${b.id}">
+      <h3>🔀 ${esc(p.title || 'Расставьте по порядку')}</h3>
+      ${p.note ? `<div style="font-size:13px;color:var(--gray);margin-bottom:12px">${esc(p.note)}</div>` : ''}
+      <ol class="ord-list" id="ordlist-${b.id}" style="list-style:none;padding:0;margin:0">
+        ${items.map((it, ix) => {
+          const mark = res ? res[ix] : undefined;
+          return `<li class="ord-item" draggable="true" data-val="${esc(it)}"
+            style="display:flex;align-items:center;gap:10px;background:#FDFCF8;border:2px solid ${mark===false?'var(--red)':mark===true?'#8BD3A0':'var(--cream-dark)'};border-radius:10px;padding:10px 12px;margin:6px 0;cursor:grab">
+            <span style="color:var(--gray);font-size:18px">⠿</span>
+            <span style="flex:1;font-weight:700">${esc(it)}</span>
+            <span style="display:flex;gap:4px">
+              <button type="button" onclick="ordMove(this,-1)" style="border:none;background:#eee;border-radius:6px;cursor:pointer;padding:2px 9px;font-size:14px">↑</button>
+              <button type="button" onclick="ordMove(this,1)" style="border:none;background:#eee;border-radius:6px;cursor:pointer;padding:2px 9px;font-size:14px">↓</button>
+            </span></li>`;
+        }).join('')}
+      </ol>
+      ${s?.auto_score != null ? `<div class="note ${ok?'ok':'warn'}">Результат: <b>${s.auto_score}%</b>${ok?' — верно ✅':` — нужно минимум ${pass}%`}</div>` : ''}
+      <div style="margin-top:16px"><button class="btn" onclick="submitOrder('${b.id}')">${s?'Проверить ещё раз':'Проверить'}</button></div>
+    </div></div>`;
+  }
+  if (b.type === 'match') {
+    const s = b.submission;
+    const res = s?.results || null;
+    const pass = currentCourseData?.pass_score ?? 90;
+    const ok = s?.auto_score != null && s.auto_score >= pass;
+    const lefts = p.lefts || [];
+    const rights = p.rights || [];
+    const saved = (s?.answers?.match && Array.isArray(s.answers.match)) ? s.answers.match : [];
+    return `<div class="block"><div class="qbox" id="match-${b.id}">
+      <h3>🔗 ${esc(p.title || 'Соедините пары')}</h3>
+      ${p.note ? `<div style="font-size:13px;color:var(--gray);margin-bottom:12px">${esc(p.note)}</div>` : ''}
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <div style="flex:1;min-width:240px">
+          ${lefts.map((lf, li) => {
+            const mark = res ? res[li] : undefined;
+            const placed = saved[li] || '';
+            return `<div class="mt-row" data-li="${li}" style="display:flex;align-items:center;gap:8px;margin:6px 0">
+              <span style="flex:0 0 42%;font-weight:700">${esc(lf)}</span>
+              <span class="mt-slot" data-li="${li}" style="flex:1;min-height:40px;display:flex;align-items:center;border:2px dashed ${mark===false?'var(--red)':mark===true?'#8BD3A0':'var(--cream-dark)'};border-radius:10px;padding:5px 8px;background:#FDFCF8">${placed?`<span class="mt-chip" draggable="true" data-val="${esc(placed)}" style="display:inline-block;background:#F0ECFF;border:1px solid var(--purple);border-radius:999px;padding:5px 12px;cursor:grab;font-weight:600">${esc(placed)}</span>`:''}</span>
+            </div>`;
+          }).join('')}
+        </div>
+        <div class="mt-bank" style="flex:0 0 210px;min-height:60px;border:2px dashed var(--cream-dark);border-radius:10px;padding:8px;background:#fff">
+          <div style="font-size:12px;color:var(--gray);margin-bottom:6px">Перетащите варианты влево:</div>
+          ${rights.filter(r => !saved.includes(r)).map(r => `<span class="mt-chip" draggable="true" data-val="${esc(r)}" style="display:inline-block;background:#F0ECFF;border:1px solid var(--purple);border-radius:999px;padding:5px 12px;margin:3px;cursor:grab;font-weight:600">${esc(r)}</span>`).join('')}
+        </div>
+      </div>
+      ${s?.auto_score != null ? `<div class="note ${ok?'ok':'warn'}">Результат: <b>${s.auto_score}%</b>${ok?' ✅':` — нужно минимум ${pass}%`}</div>` : ''}
+      <div style="margin-top:16px"><button class="btn" onclick="submitMatch('${b.id}')">${s?'Проверить ещё раз':'Проверить'}</button></div>
+    </div></div>`;
+  }
   return '';
 }
+
+// ==== интерактив: order (порядок) ====
+function ordMove(btn, dir){
+  const li = btn.closest('.ord-item'); const list = li.parentElement;
+  if (dir < 0 && li.previousElementSibling) list.insertBefore(li, li.previousElementSibling);
+  if (dir > 0 && li.nextElementSibling) list.insertBefore(li.nextElementSibling, li);
+  try { markDirty(); } catch(_){}
+}
+async function submitOrder(blockId){
+  const list = document.getElementById('ordlist-' + blockId);
+  const order = [...list.querySelectorAll('.ord-item')].map(li => li.dataset.val);
+  const { data, error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: { order } });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  clearDirty();
+  markLocalSubmission(blockId, 'block', { answers: { order }, auto_score: data?.score, results: data?.results });
+  showBlockResult(blockId, data);
+}
+// ==== интерактив: match (пары) ====
+async function submitMatch(blockId){
+  const box = document.getElementById('match-' + blockId);
+  const match = [...box.querySelectorAll('.mt-row')].map(r => {
+    const c = r.querySelector('.mt-slot .mt-chip'); return c ? c.dataset.val : null;
+  });
+  const { data, error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: { match } });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  clearDirty();
+  markLocalSubmission(blockId, 'block', { answers: { match }, auto_score: data?.score, results: data?.results });
+  showBlockResult(blockId, data);
+}
+// drag-and-drop (делегирование для всех order/match на странице) + клик-фолбэк для тача
+(function initInteractiveDnD(){
+  if (window.__interactiveDnD) return; window.__interactiveDnD = true;
+  let dragEl = null, dragKind = null;
+  document.addEventListener('dragstart', e => {
+    const ord = e.target.closest?.('.ord-item'); const chip = e.target.closest?.('.mt-chip');
+    if (ord) { dragEl = ord; dragKind = 'ord'; e.dataTransfer.effectAllowed = 'move'; }
+    else if (chip) { dragEl = chip; dragKind = 'chip'; e.dataTransfer.effectAllowed = 'move'; }
+  });
+  document.addEventListener('dragover', e => {
+    if (dragKind === 'ord') {
+      const li = e.target.closest?.('.ord-item');
+      if (li && li !== dragEl) { e.preventDefault(); const rect = li.getBoundingClientRect();
+        const after = (e.clientY - rect.top) / rect.height > 0.5;
+        li.parentElement.insertBefore(dragEl, after ? li.nextSibling : li); }
+    } else if (dragKind === 'chip') {
+      if (e.target.closest?.('.mt-slot, .mt-bank')) e.preventDefault();
+    }
+  });
+  document.addEventListener('drop', e => {
+    if (dragKind === 'chip' && dragEl) {
+      const slot = e.target.closest?.('.mt-slot'); const bank = e.target.closest?.('.mt-bank');
+      const box = dragEl.closest('.qbox'); const bankEl = box?.querySelector('.mt-bank');
+      if (slot) { const ex = slot.querySelector('.mt-chip'); if (ex && ex !== dragEl && bankEl) bankEl.appendChild(ex); slot.appendChild(dragEl); e.preventDefault(); }
+      else if (bank) { bank.appendChild(dragEl); e.preventDefault(); }
+    }
+    dragEl = null; dragKind = null; try { markDirty(); } catch(_){}
+  });
+  document.addEventListener('dragend', () => { dragEl = null; dragKind = null; });
+  let sel = null;
+  document.addEventListener('click', e => {
+    const chip = e.target.closest?.('.mt-chip'); const slot = e.target.closest?.('.mt-slot');
+    if (chip) { if (sel) sel.style.outline = ''; sel = chip; chip.style.outline = '2px solid var(--purple)'; return; }
+    if (slot && sel) { const box = slot.closest('.qbox'); const bankEl = box?.querySelector('.mt-bank');
+      const ex = slot.querySelector('.mt-chip'); if (ex && bankEl) bankEl.appendChild(ex);
+      slot.appendChild(sel); sel.style.outline = ''; sel = null; try { markDirty(); } catch(_){} }
+  });
+})();
 
 // снять отметки с неверно отвеченных вопросов, чтобы ответить заново
 function clearWrong(blockId){
@@ -4193,7 +4339,8 @@ async function submitQuiz(blockId){
 
 // результат задания показываем на месте, не трогая остальную страницу
 function showBlockResult(blockId, data){
-  const box = document.getElementById('quiz-' + blockId) || document.getElementById('exin-' + blockId);
+  const box = document.getElementById('quiz-' + blockId) || document.getElementById('exin-' + blockId)
+           || document.getElementById('order-' + blockId) || document.getElementById('match-' + blockId);
   const host = box ? box.parentElement : null;
   if (!host) return;
   let res = host.querySelector('.block-result');
