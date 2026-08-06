@@ -3167,9 +3167,9 @@ function renderBlock(b){
         ${files.map((f,i) => fileChip(f, b.id, i, locked)).join('')}
       </div>
       ${locked ? '' : `<label class="drop" id="drop-${b.id}">
-        <input type="file" id="file-${b.id}" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.doc,.docx,.ppt,.pptx,.txt" onchange="pickFiles('${b.id}')" style="display:none">
+        <input type="file" id="file-${b.id}" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.doc,.docx,.ppt,.pptx,.txt,.mp3,.m4a,.wav,.ogg,.aac,audio/*" onchange="pickFiles('${b.id}')" style="display:none">
         <span>📎 Прикрепить файл (по желанию)</span>
-        <span class="hint">Если удобнее приложить фото/документ</span>
+        <span class="hint">Фото, документ или аудио (MP3, M4A и т.п.)</span>
       </label>`}
       ${s?.review_status === 'pending' ? '<div class="note warn">⏳ Отправлено методисту на проверку</div>' : ''}
       ${s?.review_status === 'approved' ? `<div class="note ok">✅ Принято методистом${s.note ? ': ' + esc(s.note) : ''}</div>` : ''}
