@@ -444,6 +444,19 @@ const sb = location.hostname.endsWith('.wowteach.ru')
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { storage: cookieStore } })
   : window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// В режиме предпросмотра наставник смотрит чужой курс без записи —
+// любые попытки ответить/сдать перехватываем здесь, чтобы не ловить ошибки базы.
+(function(){
+  const _rpc = sb.rpc.bind(sb);
+  sb.rpc = function(name, args, opts){
+    if (window.__previewMode && /^learn_(submit|finish|start|save)/.test(name)) {
+      return Promise.resolve({ data:null, error:{ message:
+        'Предпросмотр: отвечать и сдавать нельзя — вы смотрите курс как наставник.' } });
+    }
+    return _rpc(name, args, opts);
+  };
+})();
+
 let captchaToken = null;
 function onCaptcha(t){ captchaToken = t; }
 
@@ -469,6 +482,10 @@ async function init(){
   sessionReady = true;
   const { data: isEditor } = await sb.rpc('learn_is_editor');
   window.__isEditor = !!isEditor;
+  // наставник: свои подопечные + предпросмотр курсов онбординга
+  const { data: mt } = await sb.rpc('learn_my_mentees');
+  window.__buddy = !!(mt && mt.is_buddy);
+  window.__mentees = (mt && mt.mentees) || [];
   document.getElementById('me').innerHTML =
     `<span id="teachNotifBell"></span>${esc(session.user.email)} · <button onclick="logout()">Выйти</button>`;
   renderMainNav();
@@ -483,6 +500,8 @@ async function init(){
       ? [['','📚 Курсы'],['progress','📊 Прогресс'],['journal','🗂 Журнал'],
          ['certs','🏅 Сертификаты'],['analytics','📈 Аналитика'],['feedback','💬 Отзывы'],['review','✅ Проверка'],['teachers','👥 Досье']]
       : [['','📚 Курсы'],['progress','📊 Прогресс'],['certs','🏅 Сертификаты']];
+    // наставнику — свой раздел, сразу после курсов
+    if (window.__buddy) items.splice(1, 0, ['mentees','🧑‍🏫 Подопечные']);
     tabs.innerHTML = items.map(([route, label]) =>
       `<a class="navtab" data-route="${route}" href="#${route}" onclick="go('${route}');return false">${label}</a>`).join('');
     nav.style.display = 'block';
@@ -513,6 +532,7 @@ function applyRoute(){
   if (parts[0] === 'map' && parts[1]) { openCourseMap(parts[1]); return; }
   if (parts[0] === 'review') { openReviewCabinet('queue'); return; }
   if (parts[0] === 'teachers') { openReviewCabinet('teachers'); return; }
+  if (parts[0] === 'mentees') { openMentees(); return; }
   if (parts[0] === 'progress') { openProgress(); return; }
   if (parts[0] === 'journal') { openJournal(); return; }
   if (parts[0] === 'certs') { openCerts(); return; }
@@ -598,6 +618,7 @@ async function logout(){ await sb.auth.signOut(); location.reload(); }
 // ============ Каталог ============
 async function showCatalog(fromRoute){
   if (!fromRoute) { go(''); return; }
+  window.__previewMode = false;
   show('catalog');
   const { data, error } = await sb.rpc('learn_my_courses');
   const grid = document.getElementById('courseGrid');
@@ -612,7 +633,8 @@ async function showCatalog(fromRoute){
       ${c.enrolled ? `<div class="bar"><i style="width:${pct}%"></i></div>
         <div class="meta"><span>${c.done_lessons} из ${c.total_lessons} уроков</span>
         ${c.completed_at ? '<span class="badge-done">✓ пройден</span>' : `<span>${pct}%</span>`}</div>`
-        : `<div class="meta"><span>${c.total_lessons} уроков</span><span style="color:var(--purple)">Начать →</span></div>`}
+        : `<div class="meta"><span>${c.total_lessons} уроков</span>
+           <span style="color:var(--purple)">${c.preview ? 'Предпросмотр →' : 'Начать →'}</span></div>`}
     </div>`;
   }).join('');
 }
@@ -629,6 +651,7 @@ async function openCourse(slug, fromRoute){
   const { data, error } = await sb.rpc('learn_course_view', { p_course_slug: slug });
   if (error) { body.innerHTML = '<div class="note warn">' + esc(error.message) + '</div>'; return; }
   currentCourseData = data;
+  window.__previewMode = !!data.preview;
 
   const done = (data.lessons||[]).filter(l => l.done_at).length;
   const total = (data.lessons||[]).length;
@@ -641,6 +664,11 @@ async function openCourse(slug, fromRoute){
         <div class="sub">${esc(data.subtitle || '')}</div>
       </div>
     </div>
+
+    ${data.preview ? `<div class="note" style="background:#F0ECFF;border-color:#D9CFFF;margin-bottom:18px">
+      👀 <b>Предпросмотр наставника.</b> Вы смотрите курс так, чтобы понимать, что проходят ваши подопечные —
+      <b>вместе с правильными ответами</b>. Отвечать и сдавать в этом режиме нельзя, прогресс не сохраняется.
+    </div>` : ''}
 
     <div style="margin-bottom:20px">
       <button class="btn btn-ghost" onclick="go('map/${slug}')">🗺 Карта курса и дедлайны</button>
@@ -691,7 +719,8 @@ async function openCourse(slug, fromRoute){
 let currentLesson = null;
 // открыть урок из роутера: сначала грузим курс, если он ещё не загружен
 // ===== Урок глазами преподавателя (для методиста) =====
-async function openLessonAsTeacher(enrollmentId, lessonSlug){
+async function openLessonAsTeacher(enrollmentId, lessonSlug, from){
+  if (from) window.__fwReturn = from;
   show('review');
   const body = document.getElementById('reviewBody');
   body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Загружаю урок…</div>';
@@ -877,6 +906,133 @@ function screenStub(title, text){
     <p style="color:var(--gray);margin-bottom:24px">${text}</p>
     <div class="note">Этот раздел скоро появится.</div>`;
 }
+// ===== Наставник: мои подопечные =====
+async function openMentees(){
+  window.__previewMode = false;
+  show('review');
+  const body = document.getElementById('reviewBody');
+  body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--gray)">Загружаю…</div>';
+  const { data, error } = await sb.rpc('learn_my_mentees');
+  if (error) { body.innerHTML = '<div class="note warn">' + esc(error.message) + '</div>'; return; }
+  window.__mentees = (data && data.mentees) || [];
+  renderMentees(window.__mentees);
+}
+function mtBar(done, total, color){
+  const pct = total ? Math.round(done * 100 / total) : 0;
+  return `<div style="height:8px;background:#EFEBE4;border-radius:99px;overflow:hidden;margin:6px 0 4px">
+    <i style="display:block;height:100%;width:${pct}%;background:${color || 'var(--purple)'}"></i></div>`;
+}
+function mtDate(x){
+  return x ? new Date(x).toLocaleDateString('ru-RU', { day:'numeric', month:'short' }) : '';
+}
+function renderMentees(rows){
+  const body = document.getElementById('reviewBody');
+  const head = `<h1 style="font-size:32px;margin-bottom:8px">🧑‍🏫 Мои подопечные</h1>
+    <p style="color:var(--gray);margin-bottom:24px">Кого вы ведёте по онбордингу и как у них идут дела.
+    Работы принимаете вы: кнопки у сданных уроков и у пройденного курса.</p>`;
+  if (!rows.length) {
+    body.innerHTML = head + '<div class="note">Пока никого. Как только за вами закрепят новичка, он появится здесь.</div>';
+    return;
+  }
+  body.innerHTML = head + rows.map(m => {
+    const stepsPct = m.steps_total ? Math.round(m.steps_done * 100 / m.steps_total) : 0;
+    const state = m.stopped_at ? ['Онбординг остановлен', '#B91C1C', '#FEE2E2']
+      : m.done_at ? ['Онбординг завершён 🎉', '#15803D', '#DCFCE7']
+      : m.overdue ? ['Есть просрочка', '#B91C1C', '#FEE2E2']
+      : ['Идёт онбординг', '#1D4ED8', '#DBEAFE'];
+    return `<div style="background:#fff;border:1px solid #EFEBE4;border-radius:16px;padding:18px 20px;margin-bottom:14px">
+      <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+        <div style="font-size:19px;font-weight:800">${esc(m.name)}</div>
+        <span style="background:${state[2]};color:${state[1]};font-size:12px;font-weight:800;
+          border-radius:99px;padding:4px 11px">${state[0]}</span>
+        <span style="margin-left:auto;color:var(--gray);font-size:13px">
+          ${esc(m.age_group || '')}${m.started_at ? ' · старт ' + mtDate(m.started_at) : ''}</span>
+      </div>
+
+      <div style="margin-top:12px;font-size:13.5px;color:var(--gray)">
+        Шаги онбординга: <b style="color:#2D2D3F">${m.steps_done} из ${m.steps_total}</b>
+        ${m.current_step ? ' · сейчас: <b style="color:#2D2D3F">' + esc(m.current_step) + '</b>' : ''}
+        ${m.current_due ? '<span style="color:' + (m.overdue ? '#B91C1C' : 'var(--gray)') + '"> · до ' + mtDate(m.current_due) + '</span>' : ''}
+      </div>
+      ${mtBar(m.steps_done, m.steps_total, stepsPct === 100 ? '#22C55E' : 'var(--purple)')}
+
+      ${(m.courses || []).length ? m.courses.map(c => `
+        <div style="margin-top:14px;padding-top:12px;border-top:1px dashed #EFEBE4">
+          <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;font-size:14px">
+            <span>${c.emoji || '📚'}</span><b>${esc(c.title)}</b>
+            <span style="color:var(--gray);font-size:13px">${c.done_lessons} из ${c.total_lessons} уроков</span>
+            ${c.completed_at ? '<span style="color:#15803D;font-weight:800;font-size:12.5px">✓ пройден</span>' : ''}
+            ${c.pending_review ? '<span style="color:#C2410C;font-weight:800;font-size:12.5px">есть работы на проверке</span>' : ''}
+            ${c.suspended ? '<span style="color:#B91C1C;font-weight:800;font-size:12.5px">доступ приостановлен</span>' : ''}
+            ${c.deadline_at && !c.completed_at ? '<span style="margin-left:auto;color:var(--gray);font-size:12.5px">срок до ' + mtDate(c.deadline_at) + '</span>' : ''}
+          </div>
+          ${!c.completed_at && c.total_lessons && c.done_lessons >= c.total_lessons ? `
+            <div style="margin:8px 0 2px"><button class="btn btn-green" style="padding:7px 16px;font-size:12.5px"
+              onclick="acceptCourse('${c.enrollment_id}','${esc(c.title)}')">✅ Принять курс</button>
+              <span style="font-size:12px;color:var(--gray);margin-left:8px">все уроки пройдены</span></div>` : ''}
+          ${mtBar(c.done_lessons, c.total_lessons, c.completed_at ? '#22C55E' : 'var(--purple)')}
+          ${(c.lessons || []).length ? `<div class="tp-lessons">
+            ${c.lessons.map(ls => {
+              const st = ls.pending ? 'pending' : ls.done_at ? 'done' : ls.started_at ? 'progress' : 'none';
+              const icon = { pending:'⏳', done:'✅', progress:'🔸', none:'⚪️' }[st];
+              const label = { pending:'сдан · ждёт проверки', done:'пройден' + (ls.score != null ? ' · ' + ls.score + '%' : ''),
+                              progress:'в процессе', none:'не начат' }[st];
+              return `<div class="tp-lesson">
+                <span>${icon} ${esc(ls.title)}${ls.has_exam ? ' 📝' : ''}</span>
+                <span style="display:flex;align-items:center;gap:10px;white-space:nowrap">
+                  <span style="color:var(--gray);font-size:11.5px">${label}</span>
+                  ${ls.has_work ? `<button class="btn btn-ghost" style="padding:5px 12px;font-size:11.5px"
+                    onclick="openLessonAsTeacher('${c.enrollment_id}','${ls.slug}','mentees')">смотреть работу →</button>` : ''}
+                  ${ls.pending ? `<button class="btn btn-green" style="padding:5px 12px;font-size:11.5px"
+                    onclick='acceptWork("${c.enrollment_id}", ${JSON.stringify(ls.pending_blocks || [])})'>✅ принять</button>
+                  <button class="btn btn-ghost" style="padding:5px 12px;font-size:11.5px"
+                    onclick='returnWork("${c.enrollment_id}", ${JSON.stringify(ls.pending_blocks || [])})'>✏️ вернуть</button>` : ''}
+                </span></div>`;
+            }).join('')}
+          </div>` : ''}
+        </div>`).join('')
+        : '<div style="margin-top:12px;font-size:13px;color:var(--gray)">Курс ещё не назначен — он появится, когда до него дойдёт очередь в онбординге.</div>'}
+
+      <div style="margin-top:12px;font-size:12.5px;color:var(--gray)">
+        ${esc(m.email || '')}${m.telegram ? ' · ' + esc(m.telegram) : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// Наставник принимает работы и курсы своих подопечных.
+// Права проверяются в базе: чужую работу принять нельзя.
+async function acceptWork(enrollmentId, blocks){
+  if (!blocks || !blocks.length) { alert('Нечего принимать: работа не найдена.'); return; }
+  const note = prompt('Комментарий преподавателю (необязательно):', '');
+  if (note === null) return;
+  for (const b of blocks) {
+    const { error } = await sb.rpc('learn_finish_review',
+      { p_enrollment_id: enrollmentId, p_block_id: b, p_comment: note || null });
+    if (error) { alert('Не получилось: ' + error.message); return; }
+  }
+  await openMentees();
+}
+async function returnWork(enrollmentId, blocks){
+  if (!blocks || !blocks.length) { alert('Работа не найдена.'); return; }
+  const note = prompt('Что доработать? Текст уйдёт преподавателю письмом:', '');
+  if (note === null) return;
+  if (!note.trim()) { alert('Без объяснения возвращать не стоит — напишите, что поправить.'); return; }
+  const { error } = await sb.rpc('learn_return_for_revision',
+    { p_enrollment_id: enrollmentId, p_block_id: blocks[0], p_comment: note.trim() });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  await openMentees();
+}
+async function acceptCourse(enrollmentId, title){
+  if (!confirm(`Принять курс «${title}»?\n\nШаг онбординга закроется автоматически, `
+    + 'а после первой части откроется рабочий кабинет app.wowteach.ru.')) return;
+  const { data, error } = await sb.rpc('learn_finish_course', { p_enrollment_id: enrollmentId });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  if (data && data.ok === false) { alert(data.reason || 'Курс уже завершён'); return; }
+  await openMentees();
+  alert('Курс принят' + (data?.certificate ? '. Сертификат № ' + data.certificate : '.'));
+}
+
 async function openProgress(){
   show('review');
   const body = document.getElementById('reviewBody');
@@ -2186,6 +2342,7 @@ async function copyWorkLink(enr, blk, btn){
 function backFromFullWork(){
   const from = window.__fwReturn || 'queue';
   window.__fwReturn = null;
+  if (from === 'mentees') { openMentees(); return; }
   if (from === 'progress') { openProgress(); return; }
   if (from === 'archive') { openReviewCabinet('archive'); loadReviewedWorks(); return; }
   openReviewCabinet('queue');
