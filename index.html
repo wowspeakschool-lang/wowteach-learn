@@ -1124,6 +1124,10 @@ function renderWatchBlock(){
 }
 
 let progressSearch = '';
+let progressStatus = new Set();   // overdue/pending/suspended/done/active
+let progressCourse = '';          // slug курса или ''
+let progressHideDone = false;
+function toggleProgStatus(s){ progressStatus.has(s)?progressStatus.delete(s):progressStatus.add(s); renderProgressOverview(window.__progressRows); }
 function renderProgressOverview(rows){
   const body = document.getElementById('reviewBody');
   window.__progressRows = rows;
@@ -1131,20 +1135,64 @@ function renderProgressOverview(rows){
     body.innerHTML = '<h1 style="font-size:32px;margin-bottom:8px">📊 Прогресс</h1><div class="note">Пока нет преподавателей с назначенными курсами.</div>';
     return;
   }
+  // список курсов для выпадашки (уникальные по slug)
+  const courseMap = new Map();
+  rows.forEach(r => r.courses.forEach(c => { if(!courseMap.has(c.slug)) courseMap.set(c.slug, {slug:c.slug, title:c.title, emoji:c.emoji}); }));
+  const courseOpts = [...courseMap.values()].sort((a,b)=>a.title.localeCompare(b.title,'ru'));
+
+  // набор статусов преподавателя
+  const statusesOf = (r) => {
+    const s = new Set();
+    if (r.has_overdue) s.add('overdue');
+    if (r.has_pending) s.add('pending');
+    if (r.has_suspended) s.add('suspended');
+    const done = r.courses_count>0 && r.completed_count===r.courses_count;
+    s.add(done ? 'done' : 'active');
+    return s;
+  };
+
   const q = progressSearch.trim().toLowerCase();
-  const filtered = q ? rows.filter(r => (r.teacher||'').toLowerCase().includes(q)) : rows;
+  const filtered = rows.filter(r => {
+    if (q && !(r.teacher||'').toLowerCase().includes(q)) return false;
+    if (progressCourse && !r.courses.some(c => c.slug === progressCourse)) return false;
+    const st = statusesOf(r);
+    if (progressHideDone && st.has('done')) return false;
+    if (progressStatus.size && ![...progressStatus].some(x => st.has(x))) return false;
+    return true;
+  });
+
+  const chipStyle = (on)=>`padding:6px 12px;border-radius:999px;border:1.5px solid ${on?'var(--purple)':'var(--cream-dark)'};background:${on?'var(--purple)':'#fff'};color:${on?'#fff':'var(--ink)'};font-size:12.5px;cursor:pointer`;
+  const CH = [['overdue','⚠️ просрочка'],['pending','⏳ на проверке'],['suspended','🚫 приостановлен'],['active','📗 учится'],['done','✅ завершён']];
+  const chips = CH.map(([k,label]) => `<button style="${chipStyle(progressStatus.has(k))}" onclick="toggleProgStatus('${k}')">${label}</button>`).join('');
+  const anyFilter = progressStatus.size||progressCourse||progressHideDone||q;
 
   body.innerHTML = `
     <h1 style="font-size:32px;margin-bottom:8px">📊 Прогресс преподавателей</h1>
     <p style="color:var(--gray);margin-bottom:16px">Работы, статусы, дедлайны и прогресс. Нажмите на преподавателя для деталей.</p>
     ${renderWatchBlock()}
-    <input placeholder="🔍 Поиск преподавателя…" value="${esc(progressSearch)}"
-      oninput="progressSearch=this.value;renderProgressOverview(window.__progressRows);this.focus()"
-      style="width:100%;padding:11px 15px;border:2px solid var(--cream-dark);border-radius:11px;font-size:14px;background:#fff;margin-bottom:16px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <input placeholder="🔍 Поиск преподавателя…" value="${esc(progressSearch)}"
+        oninput="progressSearch=this.value;renderProgressOverview(window.__progressRows);this.focus()"
+        style="flex:1;min-width:200px;padding:11px 15px;border:2px solid var(--cream-dark);border-radius:11px;font-size:14px;background:#fff">
+      <select onchange="progressCourse=this.value;renderProgressOverview(window.__progressRows)"
+        style="padding:11px 14px;border:2px solid var(--cream-dark);border-radius:11px;font-size:14px;background:#fff">
+        <option value="">Все курсы</option>
+        ${courseOpts.map(c=>`<option value="${c.slug}"${progressCourse===c.slug?' selected':''}>${esc((c.emoji||'📘')+' '+c.title)}</option>`).join('')}
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--gray);white-space:nowrap;cursor:pointer">
+        <input type="checkbox" ${progressHideDone?'checked':''} onchange="progressHideDone=this.checked;renderProgressOverview(window.__progressRows)">
+        скрыть завершённых
+      </label>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:14px">${chips}
+      ${anyFilter?`<button style="${chipStyle(false)}" onclick="progressStatus=new Set();progressCourse='';progressHideDone=false;progressSearch='';renderProgressOverview(window.__progressRows)">✕ сбросить</button>`:''}
+      <span style="font-size:12.5px;color:var(--gray);margin-left:auto">Показано: ${filtered.length} из ${rows.length}</span>
+    </div>
     <div class="tp-list">
-      ${filtered.map((r,i) => {
-        const doneAll = r.courses.reduce((a,c)=>a+c.done,0);
-        const totalAll = r.courses.reduce((a,c)=>a+c.total,0);
+      ${filtered.length ? filtered.map((r,i) => {
+        const shownCourses = progressCourse ? r.courses.filter(c=>c.slug===progressCourse) : r.courses;
+        const doneAll = shownCourses.reduce((a,c)=>a+c.done,0);
+        const totalAll = shownCourses.reduce((a,c)=>a+c.total,0);
         const pct = totalAll ? Math.round(doneAll*100/totalAll) : 0;
         const flags = [];
         if (r.has_overdue) flags.push('<span class="tp-flag bad">⚠️ просрочка</span>');
@@ -1165,7 +1213,7 @@ function renderProgressOverview(rows){
             <span class="tp-caret" id="tp-caret-${i}">▸</span>
           </div>
           <div class="tp-body" id="tp-body-${i}" style="display:none">
-            ${r.courses.map(c => {
+            ${shownCourses.map(c => {
               const cpct = c.total ? Math.round(c.done*100/c.total) : 0;
               const dl = c.deadline ? new Date(c.deadline) : null;
               const overdue = dl && dl < Date.now() && !c.completed;
@@ -1221,7 +1269,7 @@ function renderProgressOverview(rows){
             }).join('')}
           </div>
         </div>`;
-      }).join('')}
+      }).join('') : '<div class="note">Никого не найдено по выбранным фильтрам.</div>'}
     </div>`;
 }
 
@@ -1320,9 +1368,16 @@ function renderJournal(){
           <div style="font-weight:700">${esc(j.teacher)}</div>
           <div style="font-size:13px;color:var(--gray)">${j.emoji||'📘'} ${esc(j.course)}</div>
         </div>
-        <div style="font-size:12.5px;color:var(--gray);min-width:140px">
+        <div style="font-size:12.5px;color:var(--gray);min-width:180px">
           <div>${j.mode==='individual'?'👤 индивидуально':'👥 поток'}</div>
-          <div>старт ${fmt(j.started_at)}${j.deadline?` · до ${fmt(j.deadline)}`:''}</div>
+          <div>старт ${fmt(j.started_at)}</div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
+            <span>дедлайн:</span>
+            <input type="date" value="${j.deadline? new Date(j.deadline).toISOString().slice(0,10):''}"
+              onchange="setDeadline('${j.enrollment_id}', this.value)"
+              style="padding:3px 6px;border:1.5px solid var(--cream-dark);border-radius:7px;font-size:12px;background:#fff">
+            ${j.mode==='individual'&&j.deadline?`<button title="снять индивидуальный дедлайн (вернуть в поток)" onclick="setDeadline('${j.enrollment_id}','')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px;line-height:1">✕</button>`:''}
+          </div>
         </div>
         <div style="min-width:100px;font-size:12.5px">
           ${j.completed_at?'<span class="teach-chip ok">завершил</span>'
@@ -1375,6 +1430,14 @@ async function unassign(enrollmentId){
   if (!confirm('Снять это назначение? Прогресс преподавателя по курсу будет удалён.')) return;
   const { error } = await sb.rpc('learn_unassign_course', { p_enrollment_id: enrollmentId });
   if (error) { alert(error.message); return; }
+  openJournal();
+}
+
+async function setDeadline(enrollmentId, val){
+  // 23:59 МСК = конец дня; пустая дата → снять индивидуальный дедлайн (вернуть в поток)
+  const iso = val ? new Date(val+'T23:59:00+03:00').toISOString() : null;
+  const { error } = await sb.rpc('learn_set_deadline', { p_enrollment_id: enrollmentId, p_deadline: iso });
+  if (error) { alert('Не получилось: '+error.message); return; }
   openJournal();
 }
 async function openCerts(){ show('review'); document.getElementById('reviewBody').innerHTML = screenStub('🏅 Сертификаты', window.__isEditor?'Выписка и учёт сертификатов.':'Ваши сертификаты за пройденные курсы.'); }
