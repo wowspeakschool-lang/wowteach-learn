@@ -150,7 +150,7 @@ button{font-family:inherit;cursor:pointer}
 .kim-table th,.kim-table td{border:1.5px solid var(--cream-dark);padding:8px 12px;text-align:left}
 .kim-table th{background:var(--purple-light);font-weight:800;color:var(--purple-dark)}
 .kim-table td:last-child,.kim-table th:last-child{text-align:center;width:90px;font-weight:700}
-.exam-timer{position:sticky;top:64px;z-index:30;float:right;background:var(--purple);color:#fff;font-family:'Fredoka',sans-serif;font-weight:600;font-size:19px;padding:8px 18px;border-radius:999px;box-shadow:var(--shadow);margin-bottom:8px}
+.exam-timer{position:fixed;top:72px;right:16px;z-index:60;background:var(--purple);color:#fff;font-family:'Fredoka',sans-serif;font-weight:600;font-size:19px;padding:8px 18px;border-radius:999px;box-shadow:var(--shadow)}
 .exam-timer.danger{background:var(--red);animation:pulse 1s infinite}
 .q .bad{font-size:12px;font-weight:800;color:var(--red);background:var(--red-light);border-radius:999px;padding:2px 10px;margin-left:8px}
 .q .good{font-size:12px;font-weight:800;color:#15803D;background:var(--green-light);border-radius:999px;padding:2px 10px;margin-left:8px}
@@ -482,6 +482,7 @@ async function init(){
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { show('login'); return; }
   sessionReady = true;
+  window.__uid = session.user.id;   // нужен для локальных черновиков эссе
   const { data: isEditor } = await sb.rpc('learn_is_editor');
   window.__isEditor = !!isEditor;
   // наставник: свои подопечные + предпросмотр курсов онбординга
@@ -595,6 +596,8 @@ function show(id, noScroll){
     clearInterval(examTimerInterval);
     examTimerInterval = null;
   }
+  // уходим с урока — глушим аудирование, чтобы оно не играло в фоне
+  if (id !== 'lesson') stopExamAudio();
   ['login','catalog','course','lesson','map','review'].forEach(k =>
     document.getElementById(k).style.display = k === id ? 'block' : 'none');
   if (!noScroll) window.scrollTo({ top: 0 });
@@ -3218,9 +3221,16 @@ function renderLesson(slug, keepScroll){
     body.addEventListener('input', markDirty);
     // автосохранение секций пробника при вводе (debounce 3с) — защита от потери
     body.addEventListener('input', (e) => {
+      if (window.__isEditor) return;
+      // эссе (письменная часть) — черновик в localStorage, чтобы текст не пропал
+      // при случайном закрытии/обновлении вкладки (на сервер уходит по «Отправить»)
+      if (e.target.tagName === 'TEXTAREA' && /^wr-ta-/.test(e.target.id)) {
+        saveEssayDraft(e.target);
+        clearDirty();   // текст в безопасности локально — не пугаем браузерным предупреждением
+        return;
+      }
       const secBox = e.target.closest('[id^="exq-"], [id^="exe-"]');
       if (!secBox) return;
-      if (window.__isEditor) return;
       // сохраняем ТОЛЬКО ту секцию, где печатали (не все сразу — иначе шквал запросов)
       clearTimeout(window.__examAutosave);
       const boxId = secBox.id;
@@ -3236,6 +3246,8 @@ function renderLesson(slug, keepScroll){
   // подгружаем плееры записей устной части
   loadSpeakingPlayers(l);
   loadExamResults(l);
+  // восстановить локальные черновики эссе, если текст ещё не ушёл на сервер
+  restoreEssayDrafts();
 }
 
 
@@ -3813,12 +3825,31 @@ function mediaUrl(path){
   return data.publicUrl;
 }
 
+// единственный проигрыватель аудирования на всё приложение.
+// Нужен, чтобы аудио нельзя было запустить дважды (двойной тап по кнопке
+// раньше создавал два наложенных плеера — звук казался «ускоренным без пауз»,
+// а после конца один трек продолжал играть в фоне и его нельзя было остановить).
+let __examAudio = null;
+function stopExamAudio(){
+  if (__examAudio){
+    try { __examAudio.pause(); } catch(_){}
+    try { __examAudio.removeAttribute('src'); __examAudio.load(); } catch(_){}
+    __examAudio = null;
+  }
+}
+
 async function playListening(blockId, src){
+  // защита от повторного запуска: аудирование включается ровно один раз
+  if (__examAudio) return;
+  const btn = document.getElementById('audio-btn-' + blockId);
+  if (btn){ btn.disabled = true; btn.style.opacity = '0.55'; btn.style.pointerEvents = 'none'; }
+
   const wrap = document.getElementById('audio-wrap-' + blockId);
   const audio = new Audio(src);
+  __examAudio = audio;
   audio.preload = 'auto';
 
-  wrap.innerHTML = `
+  if (wrap) wrap.innerHTML = `
     <div class="rec-box" style="border-color:var(--purple)">
       <div style="font-weight:800;font-size:15px">🎧 Идёт аудирование</div>
       <div class="rec-time" id="audio-time-${blockId}">0:00</div>
@@ -3836,13 +3867,15 @@ async function playListening(blockId, src){
   audio.addEventListener('seeking', () => {
     if (audio.currentTime > lastTime + 0.5) audio.currentTime = lastTime;
   });
-  // запрет паузы (кроме конца)
+  // запрет паузы (кроме конца) — только пока это ещё активный плеер
   audio.addEventListener('pause', () => {
-    if (!audio.ended) audio.play().catch(()=>{});
+    if (!audio.ended && __examAudio === audio) audio.play().catch(()=>{});
   });
 
   audio.addEventListener('ended', async () => {
-    wrap.innerHTML = '<div class="note ok">🎧 Аудирование завершено. Переходите к ответам ниже.</div>';
+    if (__examAudio === audio) __examAudio = null;
+    const w = document.getElementById('audio-wrap-' + blockId);
+    if (w) w.innerHTML = '<div class="note ok">🎧 Аудирование завершено. Переходите к ответам ниже.</div>';
     // фиксируем факт прослушивания
     try { await sb.rpc('learn_submit_exam', {
       p_block_id: blockId, p_section: 'audio', p_kind: 'text',
@@ -3853,7 +3886,9 @@ async function playListening(blockId, src){
   try {
     await audio.play();
   } catch(e) {
-    wrap.innerHTML = `<div class="note err">Не удалось запустить аудио: ${esc(e.message||e)}<br>Проверьте соединение и обновите страницу.</div>`;
+    if (__examAudio === audio) __examAudio = null;
+    if (btn){ btn.disabled = false; btn.style.opacity = ''; btn.style.pointerEvents = ''; }
+    if (wrap) wrap.innerHTML = `<div class="note err">Не удалось запустить аудио: ${esc(e.message||e)}<br>Проверьте соединение и обновите страницу.</div>`;
   }
 }
 
@@ -4260,6 +4295,21 @@ async function autoSubmitWritten(blockId){
     const si = e.id.split('-').pop();
     try { await submitExamExact(blockId, si); } catch(err){ failed.push('задание ' + si); }
   }
+  // эссе (письменная часть): по истечении времени незаконченный текст тоже уходит методисту,
+  // чтобы работа не пропала. Уже принятые/отправленные работы не трогаем.
+  const bl = ((currentLesson && currentLesson.blocks) || []).find(x => x.id === blockId);
+  const stt = (bl && bl.exam_state) || {};
+  const prefix = 'wr-ta-' + blockId + '-';
+  for (const ta of box.querySelectorAll('textarea[id^="' + prefix + '"]')) {
+    const key = ta.id.slice(prefix.length);          // напр. writing_0
+    const rs = stt[key] && stt[key].review_status;
+    if (rs === 'pending' || rs === 'approved') continue;   // уже сдано/принято — не перезаписываем
+    const hasText = !!(ta.value && ta.value.trim());
+    const hasPhoto = !!wrPhotoFiles[blockId + key];
+    if (!hasText && !hasPhoto) continue;             // пусто — сдавать нечего
+    try { await autoSubmitWritingSection(blockId, key); }
+    catch(err){ failed.push('письмо ' + key.replace('writing_', '')); }
+  }
   // если что-то не ушло — человек должен об этом узнать, а не потерять ответы молча
   if (failed.length) {
     const box2 = document.getElementById('exam-' + blockId);
@@ -4267,8 +4317,9 @@ async function autoSubmitWritten(blockId){
       const warn = document.createElement('div');
       warn.className = 'note warn';
       warn.style.margin = '12px 0';
-      warn.innerHTML = '<b>Часть ответов не сохранилась при автоматической отправке.</b><br>'
-        + 'Проверьте интернет и нажмите «Сохранить ответ» в этих заданиях, иначе они не дойдут до методиста.';
+      warn.innerHTML = '<b>Часть ответов не ушла из-за связи: ' + esc(failed.join(', ')) + '.</b><br>'
+        + 'Текст письменной части сохранён у вас в браузере и не пропадёт — восстановите интернет и не закрывайте вкладку. '
+        + 'Тесты можно досдать кнопкой «Сохранить ответ».';
       box2.prepend(warn);
     }
   }
@@ -4707,6 +4758,61 @@ async function wrPhoto(blockId, key, input){
   document.getElementById(`wr-files-${blockId}-${key}`).innerHTML =
     `<div class="fchip"><span>📷 ${esc(f.name)}</span></div>`;
 }
+// ===== Локальные черновики эссе (защита от потери текста) =====
+function essayDraftKey(taId){ return 'wrdraft:' + (window.__uid||'anon') + ':' + taId; }
+function saveEssayDraft(ta){
+  try {
+    const v = ta.value;
+    if (v && v.trim()) localStorage.setItem(essayDraftKey(ta.id), v);
+    else localStorage.removeItem(essayDraftKey(ta.id));
+  } catch(_){}
+}
+function clearEssayDraft(taId){ try { localStorage.removeItem(essayDraftKey(taId)); } catch(_){} }
+// после отрисовки урока: если на сервере пусто, а локальный черновик есть — вернуть текст
+function restoreEssayDrafts(){
+  if (window.__isEditor) return;
+  document.querySelectorAll('textarea[id^="wr-ta-"]').forEach(ta => {
+    let draft = null;
+    try { draft = localStorage.getItem(essayDraftKey(ta.id)); } catch(_){}
+    if (draft && !ta.value.trim() && ta.getAttribute('disabled')===null) {
+      ta.value = draft;
+      const host = ta.closest('.sec-body') || ta.parentElement;
+      if (host && !host.querySelector('.wr-draft-note')) {
+        const n = document.createElement('div');
+        n.className = 'note wr-draft-note';
+        n.style.cssText = 'margin-top:8px;font-size:12.5px';
+        n.textContent = '↩ Восстановлен ваш черновик. Не забудьте нажать «Отправить на проверку».';
+        host.insertBefore(n, ta.nextSibling);
+      }
+    }
+  });
+}
+
+// тихая отправка эссе (без alert) — для автосдачи по истечении таймера
+async function autoSubmitWritingSection(blockId, key){
+  const ta = document.getElementById(`wr-ta-${blockId}-${key}`);
+  const photo = wrPhotoFiles[blockId+key];
+  if (photo) {
+    const { data:{session} } = await sb.auth.getSession();
+    const path = `${session.user.id}/${blockId}/${key}_${Date.now()}_${photo.name.replace(/[^\w.\-]+/g,'_')}`;
+    const { error: upErr } = await sb.storage.from('learn-tasks').upload(path, photo);
+    if (upErr) throw upErr;
+    const { error } = await sb.rpc('learn_submit_exam',
+      { p_block_id: blockId, p_section: key, p_kind: 'writing', p_answers: {},
+        p_storage: path, p_mime: photo.type, p_meta: { via: 'photo', auto: true } });
+    if (error) throw error;
+  } else {
+    const text = (ta && ta.value || '').trim();
+    if (!text) return;
+    const { error } = await sb.rpc('learn_submit_exam',
+      { p_block_id: blockId, p_section: key, p_kind: 'writing',
+        p_answers: { text }, p_meta: { via: 'typed', words: text.split(/\s+/).length, auto: true } });
+    if (error) throw error;
+  }
+  markLocalSubmission(blockId, key, { answers: { text: (ta && ta.value) || '' }, review_status: 'pending' });
+  clearEssayDraft(`wr-ta-${blockId}-${key}`);
+}
+
 async function submitWriting(blockId, key){
   const ta = document.getElementById(`wr-ta-${blockId}-${key}`);
   const photo = wrPhotoFiles[blockId+key];
@@ -4729,6 +4835,7 @@ async function submitWriting(blockId, key){
       if (error) throw error;
     }
     markLocalSubmission(blockId, key, { answers: { text: (document.getElementById(`wr-ta-${blockId}-${key}`)||{}).value || '' }, review_status: 'pending' });
+    clearEssayDraft(`wr-ta-${blockId}-${key}`);   // ушло на сервер — черновик больше не нужен
     markSectionSaved(`wr-ta-${blockId}-${key}`, null, 'Ответ отправлен на проверку');
   } catch(e){ alert('Не получилось: ' + (e.message||e)); }
 }
