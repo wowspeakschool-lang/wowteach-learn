@@ -228,6 +228,8 @@ button{font-family:inherit;cursor:pointer}
 .tp-course{background:#fff;border:1px solid var(--cream-dark);border-radius:10px;padding:13px 15px}
 .tp-lessons{margin-top:10px;border-top:1px dashed var(--cream-dark);padding-top:8px;display:flex;flex-direction:column;gap:4px}
 .tp-lesson{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:3px 0}
+.tp-lrow{border-bottom:1px solid transparent}
+.tp-inline{margin:8px 0 12px;padding:14px 14px 4px;background:#FBFAF7;border:1.5px solid var(--cream-dark);border-radius:12px}
 .prog-orow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#fff;border:1.5px solid var(--cream-dark);border-radius:12px;padding:12px 16px}
 .an-funnel{background:#fff;border:1.5px solid var(--cream-dark);border-radius:14px;padding:16px 18px}
 .fn-bar{margin-bottom:6px}
@@ -730,8 +732,7 @@ async function openLessonAsTeacher(enrollmentId, lessonSlug, from){
   renderLessonAsTeacher(data);
 }
 
-function renderLessonAsTeacher(d){
-  const body = document.getElementById('reviewBody');
+function lessonAsTeacherInner(d){
   const blocks = d.blocks || [];
   const grades = d.grades || {};
   const fmt = x => x ? new Date(x).toLocaleString('ru-RU') : '';
@@ -873,15 +874,51 @@ function renderLessonAsTeacher(d){
     ? `<span class="tp-flag ok">✅ сдан ${fmtWhen(d.done_at)}</span>`
     : d.started_at ? '<span class="tp-flag warn">🔸 в процессе</span>' : '<span class="tp-flag">не начат</span>';
 
+  const statusRow = `<div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap">${status}
+      ${d.revision_open ? '<span class="tp-flag warn">✏️ на доработке</span>' : ''}
+      ${d.exam_reviewed ? '<span class="tp-flag ok">проверено</span>' : ''}</div>`;
+
+  return { statusRow, blocksHtml };
+}
+
+// Полноэкранный просмотр урока (для наставника «Мои подопечные»)
+function renderLessonAsTeacher(d){
+  const body = document.getElementById('reviewBody');
+  const { statusRow, blocksHtml } = lessonAsTeacherInner(d);
   body.innerHTML = `
     <button class="btn btn-ghost" style="margin-bottom:16px;padding:8px 16px;font-size:13px" onclick="backFromFullWork()">← Назад</button>
     <h1 style="font-size:24px;margin-bottom:4px">${esc(d.lesson || '')}</h1>
     <p style="color:var(--gray);margin-bottom:8px">${esc(d.teacher || '')} · ${esc(d.course || '')}</p>
-    <div style="margin-bottom:18px;display:flex;gap:8px;flex-wrap:wrap">${status}
-      ${d.revision_open ? '<span class="tp-flag warn">✏️ на доработке</span>' : ''}
-      ${d.exam_reviewed ? '<span class="tp-flag ok">проверено</span>' : ''}</div>
+    ${statusRow}
     <div class="note" style="margin-bottom:16px">👁 Урок показан так, как его видел преподаватель, вместе с его ответами.</div>
     ${blocksHtml}`;
+}
+
+// Инлайн-просмотр урока прямо в «Прогрессе» — раскрывается под строкой урока,
+// не уводя методиста с текущей страницы. Данные грузятся один раз и кэшируются в DOM.
+async function toggleLessonInline(btn, enrollmentId, lessonSlug){
+  const wrap = btn.closest('.tp-lrow');
+  if (!wrap) return;
+  const panel = wrap.querySelector('.tp-inline');
+  if (!panel) return;
+  const isOpen = panel.style.display !== 'none';
+  if (isOpen) {                    // свернуть
+    panel.style.display = 'none';
+    btn.textContent = 'смотреть урок →';
+    return;
+  }
+  btn.textContent = 'скрыть ↑';
+  panel.style.display = 'block';
+  if (panel.dataset.loaded === '1') return;   // уже загружено — просто показать
+  panel.innerHTML = '<div style="padding:18px;text-align:center;color:var(--gray);font-size:13px">Загружаю урок…</div>';
+  const { data, error } = await sb.rpc('learn_lesson_as_teacher',
+    { p_enrollment_id: enrollmentId, p_lesson_slug: lessonSlug });
+  if (error) { panel.innerHTML = '<div class="note warn">' + esc(error.message) + '</div>'; return; }
+  const { statusRow, blocksHtml } = lessonAsTeacherInner(data);
+  panel.innerHTML = `${statusRow}
+    <div class="note" style="margin-bottom:14px">👁 Урок показан так, как его видел преподаватель, вместе с его ответами.</div>
+    ${blocksHtml || '<div class="note">В этом уроке нечего проверять.</div>'}`;
+  panel.dataset.loaded = '1';
 }
 
 // ===== Урок глазами преподавателя — конец =====
@@ -1255,13 +1292,16 @@ function renderProgressOverview(rows){
                     const icon = { revision:'✏️', pending:'⏳', done:'✅', progress:'🔸', none:'⚪️' }[st];
                     const label = { revision:'на доработке', pending:'сдан '+dd+' · на проверке',
                                     done:'проверен · '+dd, progress:'в процессе', none:'не начат' }[st];
-                    return `<div class="tp-lesson">
-                      <span>${icon} ${esc(ls.title)}${ls.has_exam?' 📝':''}</span>
-                      <span style="display:flex;align-items:center;gap:10px;white-space:nowrap">
-                        <span style="color:var(--gray);font-size:11.5px">${label}</span>
-                        ${ls.has_work ? `<button class="btn btn-ghost" style="padding:5px 12px;font-size:11.5px"
-                          onclick="event.stopPropagation();openLessonAsTeacher('${c.enrollment_id}','${ls.slug}')">смотреть урок →</button>` : ''}
-                      </span>
+                    return `<div class="tp-lrow">
+                      <div class="tp-lesson">
+                        <span>${icon} ${esc(ls.title)}${ls.has_exam?' 📝':''}</span>
+                        <span style="display:flex;align-items:center;gap:10px;white-space:nowrap">
+                          <span style="color:var(--gray);font-size:11.5px">${label}</span>
+                          ${ls.has_work ? `<button class="btn btn-ghost" style="padding:5px 12px;font-size:11.5px"
+                            onclick="event.stopPropagation();toggleLessonInline(this,'${c.enrollment_id}','${ls.slug}')">смотреть урок →</button>` : ''}
+                        </span>
+                      </div>
+                      ${ls.has_work ? '<div class="tp-inline" style="display:none"></div>' : ''}
                     </div>`;
                   }).join('')}
                 </div>` : ''}
@@ -4352,12 +4392,14 @@ function renderSection(blockId, sec, si, st){
           ${(sec.tasks||[]).map(t => {
             const imgList = (t.images || (t.image ? [t.image] : []));
             const imgs = imgList.length ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin:8px 0">${imgList.map(pth => `<img src="${esc(mediaUrl(pth))}" style="flex:1;min-width:220px;max-width:100%;border-radius:10px;border:1px solid var(--cream-dark)">`).join('')}</div>` : '';
-            return `<div class="sp-task">
+            return `<div class="sp-task" id="sp-${blockId}-${t.id}">
               <b style="font-size:15px">${esc(t.label||t.id)}</b>
               ${t.audio_path ? `<div style="margin-top:8px"><div style="font-size:12.5px;color:var(--gray);margin-bottom:4px">🎧 Аудио вопросов:</div><audio controls src="${esc(mediaUrl(t.audio_path))}" style="width:100%"></audio></div>` : ''}
               ${t.prompt_html ? `<div class="block-text" style="margin-top:10px;font-size:14px">${t.prompt_html}</div>` : ''}
               ${t.examiner_html ? `<div class="block-text" style="margin-top:8px;font-size:14px;background:#FBF3FF;padding:10px 12px;border-radius:8px">${t.examiner_html}</div>` : ''}
               ${imgs}
+              <button class="btn btn-ghost" style="margin-top:10px;padding:8px 18px;font-size:13px" onclick='startSpeaking("${blockId}", ${JSON.stringify(t).replace(/'/g,"&#39;")})'>🎤 Проверить запись (как у ученика)</button>
+              <div class="sp-stage" id="sp-stage-${blockId}-${t.id}" style="display:none;margin-top:10px"></div>
             </div>`;
           }).join('')}
         </div>`);
