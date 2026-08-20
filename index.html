@@ -2243,6 +2243,7 @@ function renderReviewCabinet(){
       <button class="rev-tab ${reviewTab==='queue'?'on':''}" onclick="switchReviewTab('queue')">📋 Очередь (${countWorks(reviews)})</button>
       <button class="rev-tab ${reviewTab==='archive'?'on':''}" onclick="switchReviewTab('archive')">✅ Проверенные</button>
       <button class="rev-tab ${reviewTab==='notifs'?'on':''}" onclick="switchReviewTab('notifs')">🔔 Уведомления${unread?` <span class="rev-dot">${unread}</span>`:''}</button>
+            <button class="rev-tab ${reviewTab==='deadlines'?'on':''}" onclick="switchReviewTab('deadlines')">📅 Дедлайны</button>
     </div>
     <div id="revContent"></div>`;
   renderReviewContent();
@@ -2275,12 +2276,80 @@ function countWorks(reviews){
   return keys.size;
 }
 
-function switchReviewTab(t){
+// ===== Дедлайны уроков (кабинет методиста) =====
+let dlCourse = null;   // null = все курсы
+
+async function loadDeadlines(){
+  const el = document.getElementById('revContent');
+  if (el) el.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray)">Загружаю дедлайны…</div>';
+  const { data, error } = await sb.rpc('learn_deadlines_admin', { p_course_slug: null });
+  if (error) { if (el) el.innerHTML = '<div class="note warn">'+esc(error.message)+'</div>'; return; }
+  window.__deadlines = data || [];
+  renderReviewContent();
+}
+
+async function setLessonDeadline(lessonId, val){
+  // 23:59 МСК = конец дня; пустая дата → снять дедлайн с урока
+  const iso = val ? new Date(val+'T23:59:00+03:00').toISOString() : null;
+  const { error } = await sb.rpc('learn_set_lesson_deadline', { p_lesson_id: lessonId, p_due: iso });
+  if (error) { alert('Не получилось: '+error.message); return; }
+  loadDeadlines();
+}
+
+function renderDeadlines(el){
+  const rows = window.__deadlines;
+  if (!rows) { el.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray)">Загружаю…</div>'; return; }
+
+  // грузим всегда все курсы, фильтруем на клиенте — иначе список фильтров схлопнется
+  const courses = [];
+  const seen = new Set();
+  rows.forEach(r => { if (!seen.has(r.course_slug)) { seen.add(r.course_slug); courses.push({ slug:r.course_slug, title:r.course_title, emoji:r.course_emoji }); } });
+  const list = dlCourse ? rows.filter(r => r.course_slug === dlCourse) : rows;
+
+  const filters = `
+    <div class="teach-filters" style="margin-bottom:14px">
+      <button class="teach-filter ${!dlCourse?'on':''}" onclick="dlCourse=null;renderReviewContent()">Все курсы</button>
+      ${courses.map(c => `<button class="teach-filter ${dlCourse===c.slug?'on':''}" onclick="dlCourse='${c.slug}';renderReviewContent()">${c.emoji||'📘'} ${esc(c.title)}</button>`).join('')}
+    </div>`;
+
+  const hint = '<div class="note" style="margin-bottom:12px">Дата = крайний срок сдачи урока (23:59 МСК). Пусто — дедлайна нет. Курсы многоразовые: для нового потока просто поставьте новые даты.</div>';
+
+  if (!list.length) { el.innerHTML = filters + hint + '<div class="note">Уроков не найдено.</div>'; return; }
+
+  const byCourse = {};
+  list.forEach(r => { (byCourse[r.course_slug] = byCourse[r.course_slug] || { title:r.course_title, emoji:r.course_emoji, lessons:[] }).lessons.push(r); });
+
+  el.innerHTML = filters + hint + Object.keys(byCourse).map(slug => {
+    const c = byCourse[slug];
+    return `
+    <div class="rev-card" style="margin-bottom:14px">
+      <div style="font-weight:800;font-size:17px;margin-bottom:10px">${c.emoji||'📘'} ${esc(c.title)}</div>
+      ${c.lessons.map(l => {
+        const d = l.due_at ? new Date(l.due_at) : null;
+        const overdue = d && d < new Date();
+        const val = d ? new Date(d.getTime() + 3*3600*1000).toISOString().slice(0,10) : '';
+        return `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--cream-dark)">
+          <div style="flex:1;min-width:200px">
+            <div style="font-weight:600">${esc(l.lesson_title||l.lesson_slug)}</div>
+            <div style="font-size:12px;color:var(--gray)">${esc(l.section||'')}${l.shared_count>1?` · <span style="color:#B45309">общий дедлайн на ${l.shared_count} урока</span>`:''}</div>
+          </div>
+          <input type="date" value="${val}"
+                 onchange="setLessonDeadline('${l.lesson_id}',this.value)"
+                 style="padding:7px 10px;border:2px solid var(--cream-dark);border-radius:9px;font-size:13px;background:#fff${overdue?';border-color:#F87171':''}">
+          ${val?`<button title="снять дедлайн" onclick="setLessonDeadline('${l.lesson_id}','')" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:15px;line-height:1">✕</button>`:''}
+        </div>`;
+      }).join('')}
+    </div>`;
+  }).join('');
+}
+  function switchReviewTab(t){
   reviewTab = t;
   renderReviewCabinet();
   if (t==='notifs') markNotifsRead();
   if (t==='teachers') loadTeachers();
   if (t==='archive') loadReviewedWorks();
+    if (t==='deadlines') loadDeadlines();
 }
 
 let archiveSearch = '';
@@ -2300,6 +2369,7 @@ async function markNotifsRead(){
 function renderReviewContent(){
   const el = document.getElementById('revContent');
   if (reviewTab === 'teachers') { renderTeachers(el); return; }
+    if (reviewTab === 'deadlines') { renderDeadlines(el); return; }
   if (reviewTab === 'archive') {
     const works = window.__reviewedWorks;
     if (!works) { el.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray)">Загружаю…</div>'; return; }
