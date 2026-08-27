@@ -1539,7 +1539,140 @@ async function setDeadline(enrollmentId, val){
   if (error) { alert('Не получилось: '+error.message); return; }
   openJournal();
 }
-async function openCerts(){ show('review'); document.getElementById('reviewBody').innerHTML = screenStub('🏅 Сертификаты', window.__isEditor?'Выписка и учёт сертификатов.':'Ваши сертификаты за пройденные курсы.'); }
+// ===== Сертификаты =====
+// Методист видит всех и выдаёт кнопкой; преподаватель — только свои,
+// с возможностью скачать. Данные и нумерация общие с app.wowteach.ru.
+const CERT_BG_URL = 'https://app.wowteach.ru/cert-bg-1.jpg';
+let CERTS_ROWS = [];
+
+async function openCerts(){
+  show('review');
+  const body = document.getElementById('reviewBody');
+  body.innerHTML = '<div class="wrap"><h1>🏅 Сертификаты</h1><p class="muted">Загружаю…</p></div>';
+  try {
+    const { data, error } = await sb.from('learn_progress_summary')
+      .select('*').order('user_name', { nullsFirst: false });
+    if (error) throw error;
+    CERTS_ROWS = (data || []).filter(r => r.gives_certificate);
+    renderCerts();
+  } catch (e) {
+    body.innerHTML = `<div class="wrap"><h1>🏅 Сертификаты</h1><p class="err">Не удалось загрузить: ${esc(e.message || String(e))}</p></div>`;
+  }
+}
+
+function renderCerts(){
+  const body = document.getElementById('reviewBody');
+  const editor = !!window.__isEditor;
+  const rows = CERTS_ROWS;
+  const issued = rows.filter(r => r.certificate_number);
+  const ready  = rows.filter(r => r.passed && !r.certificate_number);
+
+  if (!rows.length) {
+    body.innerHTML = `<div class="wrap"><h1>🏅 Сертификаты</h1>
+      <p class="muted">${editor ? 'Пока никто не проходил курсы с сертификатом.'
+                                : 'Здесь появятся сертификаты за пройденные курсы.'}</p></div>`;
+    return;
+  }
+
+  const card = (r) => {
+    const d = r.certificate_issued_at ? new Date(r.certificate_issued_at).toLocaleDateString('ru-RU') : '';
+    const who = editor ? `<div style="font-weight:700">${esc(r.user_name || '—')}</div>` : '';
+    let action = '';
+    if (r.certificate_number) {
+      action = `<button class="btn sec" onclick="printCert('${r.enrollment_id}')">📄 Скачать</button>`;
+    } else if (r.passed && editor) {
+      action = `<button class="btn" onclick="issueCert('${r.enrollment_id}')">Выдать</button>`;
+    }
+    let note = '';
+    if (r.certificate_number) note = `<span style="color:#15803D">✓ ${esc(r.certificate_number)}${d ? ' · ' + d : ''}</span>`;
+    else if (r.passed) note = '<span style="color:var(--orange)">курс сдан, сертификат не выдан</span>';
+    else if ((r.pending_cnt || 0) > 0) note = `<span class="muted">работы на проверке: ${r.pending_cnt}</span>`;
+    else note = `<span class="muted">${r.lessons_done || 0} из ${r.lessons_total || 0} уроков</span>`;
+
+    return `<div class="card" style="padding:14px 16px;margin-bottom:10px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <div style="flex:1;min-width:220px">
+        ${who}
+        <div style="font-size:14px">${esc(r.course_title || '')}</div>
+        <div style="font-size:12px;margin-top:3px">${note}</div>
+      </div>
+      ${action}
+    </div>`;
+  };
+
+  body.innerHTML = `<div class="wrap">
+    <h1>🏅 Сертификаты</h1>
+    <p class="muted">${editor
+      ? `Выдано ${issued.length}${ready.length ? ` · можно выдать ${ready.length}` : ''}. Сертификат доступен, когда все уроки закрыты, работы приняты и балл не ниже порога.`
+      : 'Ваши сертификаты за пройденные курсы.'}</p>
+    ${ready.length && editor ? `<h2 style="font-size:15px;margin:18px 0 8px">Можно выдать</h2>${ready.map(card).join('')}` : ''}
+    ${issued.length ? `<h2 style="font-size:15px;margin:18px 0 8px">Выданные</h2>${issued.map(card).join('')}` : ''}
+    ${editor ? `<h2 style="font-size:15px;margin:18px 0 8px">В процессе</h2>${
+        rows.filter(r => !r.passed).map(card).join('') || '<p class="muted">Нет</p>'}` : ''}
+  </div>`;
+}
+
+async function issueCert(enrollmentId){
+  const r = CERTS_ROWS.find(x => x.enrollment_id === enrollmentId);
+  if (!r) return;
+  if (!confirm(`Выдать сертификат?\n\n${r.user_name || ''}\n${r.course_title || ''}\nСредний балл: ${r.avg_score}%`)) return;
+  try {
+    const { data, error } = await sb.rpc('issue_learn_certificate', { p_enrollment_id: enrollmentId });
+    if (error) throw error;
+    const cert = Array.isArray(data) ? data[0] : data;
+    alert('✅ Сертификат выдан: ' + (cert?.number || ''));
+    openCerts();
+  } catch (e) {
+    alert('Не удалось выдать: ' + (e.message || e));
+  }
+}
+
+// Печатная версия — та же вёрстка, что в app.wowteach.ru,
+// чтобы документ выглядел одинаково откуда бы его ни скачали
+function printCert(enrollmentId){
+  const r = CERTS_ROWS.find(x => x.enrollment_id === enrollmentId);
+  if (!r || !r.certificate_number) return;
+  const issued = r.certificate_issued_at ? new Date(r.certificate_issued_at).toLocaleDateString('ru-RU') : '';
+  const longTitle = (r.course_title || '').length > 46;
+  const html = `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
+<title>${esc(r.certificate_number)} — ${esc(r.user_name || '')}</title>
+<style>
+  @page { size: 297mm 167mm; margin: 0; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#eef2f7; display:flex; flex-direction:column;
+         align-items:center; justify-content:center; min-height:100vh; padding:20px;
+         font-family:'Segoe UI', Roboto, Arial, sans-serif; }
+  .sheet { position:relative; width:297mm; height:167mm; max-width:100%; background:#fff;
+           background-image:url('${CERT_BG_URL}'); background-size:cover; background-position:center;
+           box-shadow:0 10px 40px rgba(15,23,42,.18); overflow:hidden; }
+  .num    { position:absolute; left:5.5%; top:11.8%; font-size:9pt; color:#64748b; letter-spacing:.09em; }
+  .issued { position:absolute; left:75.7%; top:11.5%; width:20%; font-size:13pt; color:#1e293b; }
+  .title  { position:absolute; left:12%; top:30.6%; width:76%; text-align:center;
+            font-family:'Times New Roman', Georgia, serif; font-size:31pt; color:#111827; }
+  .lead   { position:absolute; left:20%; top:41.6%; width:60%; text-align:center;
+            font-size:15pt; line-height:1.45; color:#1f2937; }
+  .capsule{ position:absolute; left:18.5%; top:56.9%; width:61.5%; height:12.8%;
+            border:1.6px solid #111827; border-radius:999px; background:rgba(255,255,255,.62);
+            display:flex; align-items:center; justify-content:center; padding:0 26px; }
+  .course { font-size:${longTitle ? '12.5' : '15'}pt; text-align:center; line-height:1.25; color:#111827; }
+  .bar { margin-top:18px; }
+  .bar button { padding:10px 20px; border-radius:9px; border:1px solid #7B61FF;
+                background:#7B61FF; color:#fff; font:inherit; font-size:14px; font-weight:600; cursor:pointer; }
+  @media print { body { background:#fff; padding:0; } .sheet { box-shadow:none; } .bar { display:none; } }
+</style></head><body>
+  <div class="sheet">
+    <div class="num">${esc(r.certificate_number)}</div>
+    <div class="issued">Issued on: ${esc(issued)}</div>
+    <div class="title">CERTIFICATE OF COMPLETION</div>
+    <div class="lead">This is to certify that <b>${esc(r.user_name || '')}</b><br>successfully completed the following course</div>
+    <div class="capsule"><div class="course">${esc(r.course_title || '')}</div></div>
+  </div>
+  <div class="bar"><button onclick="window.print()">Скачать PDF</button></div>
+</body></html>`;
+  const w = window.open('', '_blank');
+  if (!w) { alert('Разрешите всплывающие окна, чтобы открыть сертификат'); return; }
+  w.document.write(html);
+  w.document.close();
+}
 let analyticsCourse = null;   // null = вся школа, иначе slug
 let analyticsYear = null;     // null = текущий год
 function showChartTip(e, title, lines){
