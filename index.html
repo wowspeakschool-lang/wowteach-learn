@@ -3856,23 +3856,28 @@ function renderBlock(b){
   if (b.type === 'case_study') {
     const s = b.submission;
     const ans = s?.answers || {};
-    const revealed = !!ans.revealed;
+    const perCase = ans.per_case || {};
     const reflectionDone = !!ans.reflection_done;
     const cases = Array.isArray(p.cases) ? p.cases : [];
-    const myAnswers = ans.my_answers || {};
+    const allRevealed = cases.length > 0 && cases.every((c, ci) => !!perCase[ci]?.revealed);
 
-    const casesHtml = cases.map((c, ci) => `
+    const casesHtml = cases.map((c, ci) => {
+      const cs = perCase[ci] || {};
+      const myAnswer = cs.answer || '';
+      return `
       <div style="margin-bottom:22px">
         ${c.title ? `<h3 style="font-size:16px;margin-bottom:8px">${esc(c.title)}</h3>` : ''}
         ${c.scenario_html ? `<div class="block-text" style="margin-bottom:10px">${c.scenario_html}</div>` : ''}
         ${c.prompt_html ? `<div class="block-text" style="margin-bottom:10px;color:var(--gray)">${c.prompt_html}</div>` : ''}
-        ${revealed
-          ? `<div style="margin-bottom:10px"><b>Ваш разбор:</b><div class="block-text">${esc(myAnswers[ci]||'').replace(/\n/g,'<br>')}</div></div>
+        ${cs.revealed
+          ? `<div style="margin-bottom:10px"><b>Ваш разбор:</b><div class="block-text">${esc(myAnswer).replace(/\n/g,'<br>')}</div></div>
              <div class="explain"><b>Предложенный разбор:</b><div style="margin-top:6px">${c.model_answer_html || ''}</div></div>`
-          : `<textarea data-case="${ci}" placeholder="Ваш разбор…" style="width:100%;min-height:110px">${esc(myAnswers[ci]||'')}</textarea>`}
-      </div>`).join('');
+          : `<textarea data-case="${ci}" placeholder="Ваш разбор…" style="width:100%;min-height:110px">${esc(myAnswer)}</textarea>
+             <div style="margin-top:8px"><button class="btn" onclick="submitCaseOne('${b.id}', ${ci})">Отправить и посмотреть разбор</button></div>`}
+      </div>`;
+    }).join('');
 
-    const reflectHtml = !revealed ? '' : `
+    const reflectHtml = !allRevealed ? '' : `
       <div style="margin-top:10px">
         <h3 style="font-size:16px;margin-bottom:8px">${esc(p.reflect_prompt || 'Сравните свой разбор с предложенным')}</h3>
         ${reflectionDone
@@ -3886,7 +3891,7 @@ function renderBlock(b){
       <h3>🧩 ${esc(p.title || 'Разбор кейса')}</h3>
       ${p.intro_html ? `<div class="block-text" style="margin-bottom:16px">${p.intro_html}</div>` : ''}
       ${casesHtml}
-      ${!revealed ? `<div style="margin-top:8px"><button class="btn" onclick="submitCaseStudy('${b.id}')">Отправить и посмотреть разбор</button></div>` : reflectHtml}
+      ${reflectHtml}
     </div></div>`;
   }
   if (b.type === 'checklist') {
@@ -5191,12 +5196,16 @@ async function submitQuiz(blockId){
   showBlockResult(blockId, data);
 }
 
-async function submitCaseStudy(blockId){
+async function submitCaseOne(blockId, ci){
   const box = document.getElementById('case-' + blockId);
-  const my_answers = {};
-  box.querySelectorAll('textarea[data-case]').forEach(t => { my_answers[t.dataset.case] = t.value.trim(); });
-  if (!Object.values(my_answers).some(v => v)) { alert('Напишите разбор хотя бы по одному кейсу.'); return; }
-  const answers = { my_answers, revealed: true };
+  const ta = box.querySelector(`textarea[data-case="${ci}"]`);
+  const answer = ta.value.trim();
+  if (!answer) { alert('Напишите разбор перед отправкой.'); return; }
+  const block = (currentLesson?.blocks || []).find(x => x.id === blockId);
+  const prev = block?.submission?.answers || {};
+  const perCase = { ...(prev.per_case || {}) };
+  perCase[ci] = { answer, revealed: true };
+  const answers = { ...prev, per_case: perCase };
   const { error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: answers });
   if (error) { alert('Не получилось: ' + error.message); return; }
   clearDirty();
