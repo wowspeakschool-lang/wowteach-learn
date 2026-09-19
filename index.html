@@ -3853,6 +3853,42 @@ function renderBlock(b){
         <button class="btn btn-ghost" onclick="mtClear('${b.id}')">Сбросить</button></div>
     </div></div>`;
   }
+  if (b.type === 'case_study') {
+    const s = b.submission;
+    const ans = s?.answers || {};
+    const revealed = !!ans.revealed;
+    const reflectionDone = !!ans.reflection_done;
+    const cases = Array.isArray(p.cases) ? p.cases : [];
+    const myAnswers = ans.my_answers || {};
+
+    const casesHtml = cases.map((c, ci) => `
+      <div style="margin-bottom:22px">
+        ${c.title ? `<h3 style="font-size:16px;margin-bottom:8px">${esc(c.title)}</h3>` : ''}
+        ${c.scenario_html ? `<div class="block-text" style="margin-bottom:10px">${c.scenario_html}</div>` : ''}
+        ${c.prompt_html ? `<div class="block-text" style="margin-bottom:10px;color:var(--gray)">${c.prompt_html}</div>` : ''}
+        ${revealed
+          ? `<div style="margin-bottom:10px"><b>Ваш разбор:</b><div class="block-text">${esc(myAnswers[ci]||'').replace(/\n/g,'<br>')}</div></div>
+             <div class="explain"><b>Предложенный разбор:</b><div style="margin-top:6px">${c.model_answer_html || ''}</div></div>`
+          : `<textarea data-case="${ci}" placeholder="Ваш разбор…" style="width:100%;min-height:110px">${esc(myAnswers[ci]||'')}</textarea>`}
+      </div>`).join('');
+
+    const reflectHtml = !revealed ? '' : `
+      <div style="margin-top:10px">
+        <h3 style="font-size:16px;margin-bottom:8px">${esc(p.reflect_prompt || 'Сравните свой разбор с предложенным')}</h3>
+        ${reflectionDone
+          ? `<div class="block-text">${esc(ans.reflection||'').replace(/\n/g,'<br>')}</div>
+             <div class="note ok" style="margin-top:10px">✅ Разбор засчитан</div>`
+          : `<textarea id="reflect-${b.id}" placeholder="Ваш комментарий…" style="width:100%;min-height:90px">${esc(ans.reflection||'')}</textarea>
+             <div style="margin-top:12px"><button class="btn" onclick="submitCaseReflect('${b.id}')">Отправить</button></div>`}
+      </div>`;
+
+    return `<div class="block" id="blockwrap-${b.id}"><div class="qbox" id="case-${b.id}">
+      <h3>🧩 ${esc(p.title || 'Разбор кейса')}</h3>
+      ${p.intro_html ? `<div class="block-text" style="margin-bottom:16px">${p.intro_html}</div>` : ''}
+      ${casesHtml}
+      ${!revealed ? `<div style="margin-top:8px"><button class="btn" onclick="submitCaseStudy('${b.id}')">Отправить и посмотреть разбор</button></div>` : reflectHtml}
+    </div></div>`;
+  }
   if (b.type === 'checklist') {
     const s = b.submission;
     const ans = s?.answers || {};
@@ -5153,6 +5189,40 @@ async function submitQuiz(blockId){
   markLocalSubmission(blockId, 'block', { answers, auto_score: data?.score });
   // без перерисовки урока: иначе стёрся бы набранный, но не отправленный ответ в другом задании
   showBlockResult(blockId, data);
+}
+
+async function submitCaseStudy(blockId){
+  const box = document.getElementById('case-' + blockId);
+  const my_answers = {};
+  box.querySelectorAll('textarea[data-case]').forEach(t => { my_answers[t.dataset.case] = t.value.trim(); });
+  if (!Object.values(my_answers).some(v => v)) { alert('Напишите разбор хотя бы по одному кейсу.'); return; }
+  const answers = { my_answers, revealed: true };
+  const { error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: answers });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  clearDirty();
+  redrawCaseBlock(blockId, answers);
+}
+
+async function submitCaseReflect(blockId){
+  const block = (currentLesson?.blocks || []).find(x => x.id === blockId);
+  const prev = block?.submission?.answers || {};
+  const ta = document.getElementById('reflect-' + blockId);
+  const reflection = ta.value.trim();
+  if (!reflection) { alert('Напишите комментарий.'); return; }
+  const answers = { ...prev, reflection, reflection_done: true };
+  const { error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: answers });
+  if (error) { alert('Не получилось: ' + error.message); return; }
+  clearDirty();
+  redrawCaseBlock(blockId, answers);
+}
+
+// перерисовываем только этот блок — чтобы не потерять несохранённые ответы в других блоках урока
+function redrawCaseBlock(blockId, answers){
+  const block = (currentLesson?.blocks || []).find(x => x.id === blockId);
+  if (!block) return;
+  block.submission = { ...(block.submission || {}), answers };
+  const wrap = document.getElementById('blockwrap-' + blockId);
+  if (wrap) wrap.outerHTML = renderBlock(block);
 }
 
 // результат задания показываем на месте, не трогая остальную страницу
