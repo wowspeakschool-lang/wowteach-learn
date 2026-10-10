@@ -5209,6 +5209,15 @@ async function submitCaseOne(blockId, ci){
   const { error } = await sb.rpc('learn_submit_block', { p_block_id: blockId, p_answers: answers });
   if (error) { alert('Не получилось: ' + error.message); return; }
   clearDirty();
+  // payload при первой загрузке урока приходит без model_answer_html нераскрытых кейсов
+  // (чтобы его нельзя было подсмотреть) — после раскрытия подтягиваем свежий payload с сервера,
+  // не перерисовывая весь урок, чтобы не потерять несохранённый ввод в других блоках
+  try {
+    const { data } = await sb.rpc('learn_course_view', { p_course_slug: currentCourse });
+    const freshLesson = (data && data.lessons || []).find(x => x.slug === currentLesson.slug);
+    const freshBlock = freshLesson?.blocks?.find(x => x.id === blockId);
+    if (freshBlock) block.payload = freshBlock.payload;
+  } catch(_){}
   redrawCaseBlock(blockId, answers);
 }
 
